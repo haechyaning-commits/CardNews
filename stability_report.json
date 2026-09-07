@@ -1,0 +1,96 @@
+[
+  {
+    "topic": "다크서클 완화 관리법",
+    "final_status": "approved",
+    "attempts": 2,
+    "rejected_reasons": [
+      {
+        "attempt": 1,
+        "failed_items": [
+          "슬라이드별 이모티콘/강조부호"
+        ]
+      }
+    ]
+  },
+  {
+    "topic": "여드름 흉터 관리",
+    "final_status": "approved",
+    "attempts": 3,
+    "rejected_reasons": [
+      {
+        "attempt": 1,
+        "failed_items": [
+          "슬라이드별 이모티콘/강조부호"
+        ]
+      },
+      {
+        "attempt": 2,
+        "failed_items": [
+          "텍스트 결함"
+        ]
+      }
+    ]
+  },
+  {
+    "topic": "지성 피부 유수분 밸런스",
+    "final_status": "max_revisions_reached",
+    "attempts": 3,
+    "rejected_reasons": [
+      {
+        "attempt": 1,
+        "failed_items": [
+          "단정적 표현 없음",
+          "슬라이드별 이모티콘/강조부호",
+          "텍스트 결함"
+        ]
+      },
+      {
+        "attempt": 2,
+        "failed_items": [
+          "슬라이드별 이모티콘/강조부호"
+        ]
+      },
+      {
+        "attempt": 3,
+        "failed_items": [
+          "단정적 표현 없음",
+          "슬라이드별 이모티콘/강조부호"
+        ]
+      }
+    ]
+  },
+  {
+    "topic": "민감성 피부 진정 루틴",
+    "final_status": "approved",
+    "attempts": 3,
+    "rejected_reasons": [
+      {
+        "attempt": 1,
+        "failed_items": [
+          "슬라이드별 이모티콘/강조부호"
+        ]
+      },
+      {
+        "attempt": 2,
+        "failed_items": [
+          "단정적 표현 없음",
+          "슬라이드별 이모티콘/강조부호",
+          "의학적 근거"
+        ]
+      }
+    ]
+  },
+  {
+    "topic": "겨울철 피부 건조 관리",
+    "final_status": "approved",
+    "attempts": 2,
+    "rejected_reasons": [
+      {
+        "attempt": 1,
+        "failed_items": [
+          "슬라이드별 이모티콘/강조부호"
+        ]
+      }
+    ]
+  }
+]
