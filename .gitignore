@@ -3,15 +3,14 @@ __pycache__/
 .env
 .DS_Store
 
-# 실행할 때마다 새로 생기는 결과물(코드가 아니라 데이터/산출물)이라 커밋 안 함.
-# 리뷰어가 코드만 보고 파이프라인 구조를 이해할 수 있게, 실행 결과물은 README의
-# 스크린샷/설명으로 대신 보여준다.
-approved_script.json
-output_script.json
+# 사진 관련 산출물만 커밋 제외. approved_script.json/output_script.json/
+# review_log.json/stability_report.json은 "포트폴리오에서 몇 번 반려 끝에
+# 통과했는지, 최종 승인본이 뭔지 그대로 보여준다"는 목적으로 orchestrator.py/
+# stability_test.py가 일부러 남기는 파일이라 오히려 커밋해서 증거로 남긴다
+# (한 번 놔뒀다가 실수로 이걸 다 gitignore에 넣었었음 — 코드 주석에 적힌
+# 원래 의도랑 반대라 되돌림).
 photo_assignments.json
 crop_manifest.json
-review_log.json
-stability_report.json
 banned_photos.json
 images/
 preview.html
