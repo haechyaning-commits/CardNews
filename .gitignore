@@ -1,3 +1,20 @@
 __pycache__/
 *.pyc
 .env
+.DS_Store
+
+# 실행할 때마다 새로 생기는 결과물(코드가 아니라 데이터/산출물)이라 커밋 안 함.
+# 리뷰어가 코드만 보고 파이프라인 구조를 이해할 수 있게, 실행 결과물은 README의
+# 스크린샷/설명으로 대신 보여준다.
+approved_script.json
+output_script.json
+photo_assignments.json
+crop_manifest.json
+review_log.json
+stability_report.json
+banned_photos.json
+images/
+preview.html
+
+# 예전에 실수로 잘못된 경로에 저장된 잔여 파일 (Finder에서 수동으로 지워도 됨)
+Claude outputs/
