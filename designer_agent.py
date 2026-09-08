@@ -129,10 +129,11 @@ COLOR_SCRIM = (36, 22, 17)
 # light 버전: 밝은 사진 위에서도 항상 또렷한 흰 박스+짙은 텍스트(참고
 # 레퍼런스 스타일). dark 버전: 사진이 이미 밝고 화사해서 흰 박스를 얹으면
 # 튀거나 밋밋해 보일 때, 사진 톤에 자연스럽게 녹아드는 짙은 반투명 박스+흰
-# 텍스트.
+# 텍스트. 테두리 선 없이 배경색만 채운다 — 선으로 둘러싸이는 느낌이 싫다는
+# 피드백을 받고 뺐다.
 BOX_STYLES = {
-    "light": {"bg": (255, 255, 255, 235), "border": (24, 20, 18, 255), "text": (24, 20, 18, 255), "point_text": (168, 88, 40, 255)},
-    "dark": {"bg": (*COLOR_SCRIM, 210), "border": (232, 176, 132, 255), "text": (255, 255, 255, 255), "point_text": (232, 176, 132, 255)},
+    "light": {"bg": (255, 255, 255, 235), "text": (24, 20, 18, 255), "point_text": (168, 88, 40, 255)},
+    "dark": {"bg": (*COLOR_SCRIM, 210), "text": (255, 255, 255, 255), "point_text": (232, 176, 132, 255)},
 }
 
 TITLE_SIZE = 72    # 표지 hook / 마무리 CTA
@@ -474,7 +475,7 @@ def render_box_text(
 
     text_x = edge_x if align == "left" else edge_x - max_line_w
     box = [text_x - pad_x, top_y - pad_y, text_x + max_line_w + pad_x, last_line_bottom + pad_y]
-    draw.rectangle(box, fill=colors["bg"], outline=colors["border"], width=2)
+    draw.rectangle(box, fill=colors["bg"])  # 테두리 선 없이 배경색만 채운다 — 선으로 둘러싸인 느낌이 싫다는 피드백
     draw_wrapped(draw, lines, text_x, top_y, line_height, align="left", font_normal=font, fill_normal=text_color)
 
     return int(box[3]) + 20
