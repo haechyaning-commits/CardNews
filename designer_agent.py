@@ -34,12 +34,20 @@ crop_images.py가 만들어둔 로컬 이미지(crop_manifest.json + images/, �
   발생하면 콘솔에 로그를 남기게 함.
 - 전부 왼쪽 정렬로 통일해서(참고 레퍼런스 스타일) 카드마다 다른 배치가 아니라
   "같은 시스템, 다른 내용"으로 일관성을 줌.
+- "표지에 임팩트가 없다, 디자인이 단조롭다, 박스 색/위치를 사진에 맞게
+  유연하게, 디자이너로서 판단해라" → 표지 제목을 글자 수에 따라 동적으로
+  키우고(_title_font_size) 사진 구도에 맞춰 3가지 배치(하단좌측/가운데/
+  상단좌측) 중 하나를 씀. 본문 카드의 요약 제목/포인트 박스도 흰색 하나로
+  고정하지 않고 light/dark 두 배색과 좌/우 위치 중 Claude가 그 카드 사진을
+  보고 고르게 함(BOX_STYLES, box_style/align) — 매 카드가 똑같은 자리에
+  똑같은 색으로만 나오지 않도록.
 
-이 표지 제목/요약 제목/강조 구간/포인트는 문장을 새로 쓰는 게 아니라 "어디를
-강조할지·뭐가 필요한지"를 판단하는 작업이라 Claude 호출이 필요하다
-(annotate_cards, 카드 사진도 같이 보냄). ANTHROPIC_API_KEY가 없으면 이 단계를
-건너뛰고 표지는 hook 원문을, 본문 카드는 요약 제목/강조/포인트 없이 기본
-스타일로만 렌더링한다 — API 키가 없어도 파이프라인 자체는 죽지 않는다.
+이 표지 제목/정렬, 요약 제목/포인트와 그 배색·위치, 강조 구간은 문장을 새로
+쓰는 게 아니라 "무엇이 필요한지·어디에 어떻게 놓을지"를 판단하는 작업이라
+Claude 호출이 필요하다(annotate_cards, 카드 사진도 같이 보냄). ANTHROPIC_API_KEY가
+없으면 이 단계를 건너뛰고 표지는 hook 원문을 기본 배치로, 본문 카드는 요약
+제목/강조/포인트 없이 기본 스타일(흰 박스/왼쪽)로만 렌더링한다 — API 키가
+없어도 파이프라인 자체는 죽지 않는다.
 
 approved_script.json에는 슬라이드(표지+2~8번)와 별개로 cta/comment_question이
 최상위 필드로 따로 있다(어느 슬라이드에도 안 묶여 있음) — 이건 "마무리" 카드가
@@ -105,17 +113,26 @@ CONTENT_WIDTH = CANVAS_W - CONTENT_MARGIN_X * 2
 # 아닌 라벨이 카드에 들어가는 게 이상하다"는 피드백을 받고 태그 자체를 없앴다.
 CONTENT_TOP_PAD = 16
 
-# 색상 팔레트. 사진 위에 바로 얹는 텍스트(스크림 뒤)는 흰 텍스트 / 포인트색,
-# 박스 라벨(요약 제목/포인트 칩)은 흰 배경에 짙은 텍스트+테두리 — 참고
-# 레퍼런스처럼 "각진 흰 박스에 검정 텍스트/테두리" 스타일로 통일했다(예전엔
-# 반투명 검정 둥근 박스였는데 "흰색으로, 각지게" 피드백 반영).
+# 색상 팔레트. 사진 위에 바로 얹는 텍스트(스크림 뒤)는 흰 텍스트 / 포인트색을
+# 고정으로 쓰지만, 요약 제목/포인트 박스는 "흰 배경+검정" 하나로 고정하지
+# 않고 light/dark 두 버전을 만들어서 카드 사진에 어울리는 쪽을 Claude가
+# 사진을 보고 고르게 한다(그래야 사진마다 밝기/분위기가 다른데 박스 색이
+# 항상 똑같아서 단조로워 보인다는 피드백을 해결할 수 있다). 그래도 팔레트
+# 자체는 이 두 버전 안에서만 고르게 해서 Skill의 "색상 3색 이내" 규칙은
+# 지킨다 — 임의의 색을 막 쓰게 하는 게 아니라 이미 정해둔 두 배색 중 하나를
+# 고르는 것.
 COLOR_TEXT = (255, 255, 255, 255)
 COLOR_ACCENT = (232, 176, 132, 255)
 COLOR_SCRIM = (20, 15, 12)
-COLOR_BOX_BG = (255, 255, 255, 235)
-COLOR_BOX_BORDER = (24, 20, 18, 255)
-COLOR_BOX_TEXT = (24, 20, 18, 255)
-COLOR_POINT_TEXT = (168, 88, 40, 255)  # 포인트 칩 전용 — 흰 배경 위에서도 잘 읽히는 짙은 웜톤
+
+# light 버전: 밝은 사진 위에서도 항상 또렷한 흰 박스+짙은 텍스트(참고
+# 레퍼런스 스타일). dark 버전: 사진이 이미 밝고 화사해서 흰 박스를 얹으면
+# 튀거나 밋밋해 보일 때, 사진 톤에 자연스럽게 녹아드는 짙은 반투명 박스+흰
+# 텍스트.
+BOX_STYLES = {
+    "light": {"bg": (255, 255, 255, 235), "border": (24, 20, 18, 255), "text": (24, 20, 18, 255), "point_text": (168, 88, 40, 255)},
+    "dark": {"bg": (*COLOR_SCRIM, 210), "border": (232, 176, 132, 255), "text": (255, 255, 255, 255), "point_text": (232, 176, 132, 255)},
+}
 
 TITLE_SIZE = 72    # 표지 hook / 마무리 CTA
 HEADING_SIZE = 54  # 본문 카드 상단 요약 제목
@@ -203,6 +220,10 @@ def load_fonts():
         "body_bold": make(bold_path, bold_idx, BODY_SIZE),
         "point": make(bold_path, bold_idx, POINT_SIZE),
         "label": make(bold_path, bold_idx, LABEL_SIZE),
+        # 표지 제목은 글자 수에 따라 크기를 동적으로 키운다(짧고 강렬한 제목일수록
+        # 더 큼직하게 — "표지에 임팩트가 없다"는 피드백 반영). 고정 크기 폰트
+        # 몇 개로는 부족해서, 임의 크기를 바로 만들 수 있게 함수를 같이 넘긴다.
+        "title_maker": lambda size: make(bold_path, bold_idx, size),
     }
 
 
@@ -410,20 +431,30 @@ def add_full_scrim(img: Image.Image, opacity: int) -> Image.Image:
 def render_box_text(
     draw: ImageDraw.ImageDraw,
     text: str,
-    x: int,
+    edge_x: int,
     top_y: int,
     font: ImageFont.FreeTypeFont,
     max_width: int,
     prefix: str = "",
-    text_color=COLOR_BOX_TEXT,
+    style: str = "light",
+    align: str = "left",
+    is_point: bool = False,
 ) -> int:
-    """텍스트를 줄바꿈해서 그 블록 크기에 딱 맞는 흰 배경 + 각진 테두리 박스를
-    뒤에 깔고 왼쪽 정렬로 그린다. 요약 제목/포인트 칩이 이 함수를 공유해서
-    "사진 밝기와 무관하게 항상 읽히는 박스 라벨"이라는 같은 시각 언어를 쓴다
-    (참고 레퍼런스의 흰 박스+검정 테두리 스타일). 다음 요소를 이어붙일
-    y좌표(여백 포함)를 반환한다. 이 함수를 부르지 않으면(호출하는 쪽에서
-    heading/point가 없을 때 건너뛰면) 박스 자체가 카드에 안 들어간다 — 모든
-    카드에 박스를 강제로 넣지 않는다."""
+    """텍스트를 줄바꿈해서 그 블록 크기에 딱 맞는 각진 테두리 박스를 뒤에
+    깔고 그린다. 요약 제목/포인트 칩이 이 함수를 공유해서 "사진 밝기와
+    무관하게 항상 읽히는 박스 라벨"이라는 같은 시각 언어를 쓴다.
+
+    style("light"/"dark")과 align("left"/"right")은 카드마다 사진을 보고
+    Claude가 고른 값을 그대로 받는다 — 박스가 모든 카드에서 항상 흰색·왼쪽
+    상단으로 똑같이 나오면 단조롭다는 피드백을 받고, 사진 톤/구도에 맞춰
+    박스 배색과 좌우 위치가 카드마다 달라지게 했다. align="right"면 edge_x를
+    "오른쪽 여백선"으로 보고 박스를 거기서부터 왼쪽으로 채운다(반대로
+    "left"면 edge_x가 왼쪽 시작선). 이 함수를 안 부르면(heading/point가
+    없을 때) 박스 자체가 카드에 안 들어간다 — 모든 카드에 박스를 강제로
+    넣지 않는다. 다음 요소를 이어붙일 y좌표(여백 포함)를 반환한다."""
+    colors = BOX_STYLES.get(style, BOX_STYLES["light"])
+    text_color = colors["point_text"] if is_point else colors["text"]
+
     full_text = f"{prefix}{text}" if prefix else text
     lines = wrap_tokens(full_text, font, max_width)
     if not lines:
@@ -440,9 +471,10 @@ def render_box_text(
     max_line_w = max(line_width(line) for line in lines)
     last_line_bottom = top_y + (len(lines) - 1) * line_height + font.size
 
-    box = [x - pad_x, top_y - pad_y, x + max_line_w + pad_x, last_line_bottom + pad_y]
-    draw.rectangle(box, fill=COLOR_BOX_BG, outline=COLOR_BOX_BORDER, width=2)
-    draw_wrapped(draw, lines, x, top_y, line_height, align="left", font_normal=font, fill_normal=text_color)
+    text_x = edge_x if align == "left" else edge_x - max_line_w
+    box = [text_x - pad_x, top_y - pad_y, text_x + max_line_w + pad_x, last_line_bottom + pad_y]
+    draw.rectangle(box, fill=colors["bg"], outline=colors["border"], width=2)
+    draw_wrapped(draw, lines, text_x, top_y, line_height, align="left", font_normal=font, fill_normal=text_color)
 
     return int(box[3]) + 20
 
@@ -453,7 +485,7 @@ def render_box_text(
 
 ANNOTATE_TOOL = {
     "name": "submit_annotations",
-    "description": "카드뉴스 카드마다(표지 포함) 실제 사진을 보고 디자인 요소(표지 제목 / 요약 제목 / 강조 / 포인트)를 판단해서 만든다.",
+    "description": "카드뉴스 카드마다(표지 포함) 실제 사진을 보고 디자인 요소(표지 제목/정렬, 요약 제목/포인트와 그 배색·위치, 문장 강조)를 판단해서 만든다.",
     "input_schema": {
         "type": "object",
         "properties": {
@@ -465,11 +497,16 @@ ANNOTATE_TOOL = {
                         "index": {"type": "integer", "description": "카드 번호"},
                         "cover_title": {
                             "type": "string",
-                            "description": "표지 카드일 때만 채움. 짧고 강렬한 표지 제목(5~14자). 표지가 아니면 빈 문자열.",
+                            "description": "표지 카드일 때만 채움. 짧고 강렬한 표지 제목(5~14자). 그 안에서 가장 강조하고 싶은 한 단어/구절은 **로 감싸도 됨(예: '번들거림의 **진짜 이유**'). 표지가 아니면 빈 문자열.",
+                        },
+                        "cover_align": {
+                            "type": "string",
+                            "enum": ["bottom-left", "center", "top-left"],
+                            "description": "표지 사진을 보고 제목을 어디에 놓을지. 인물/피사체가 이미 화면 아래쪽에 있으면 top-left, 사진이 비교적 비어있고 임팩트를 줄 수 있으면 center, 그 외엔 bottom-left. 표지가 아니면 아무 값이나 둬도 무시됨.",
                         },
                         "heading": {
                             "type": "string",
-                            "description": "본문 카드에서, 사진+문구를 보고 짧은 제목이 실제로 도움이 될 때만 채움(4~14자). 필요 없으면 빈 문자열.",
+                            "description": "본문 카드에서, 사진+문구를 보고 짧은 제목이 실제로 도움이 될 때만 채움(4~14자). 필요 없으면 빈 문자열. 사진이 이미 내용을 충분히 보여주면 넣지 않는 카드가 있는 게 자연스럽다.",
                         },
                         "body": {
                             "type": "string",
@@ -477,10 +514,20 @@ ANNOTATE_TOOL = {
                         },
                         "point": {
                             "type": "string",
-                            "description": "본문 카드에서 한 줄로 뽑아낼 만한 뚜렷한 핵심 포인트(6~16자)가 있으면 적고, 없으면 빈 문자열.",
+                            "description": "본문 카드에서 한 줄로 뽑아낼 만한 뚜렷한 핵심 포인트(6~16자)가 있으면 적고, 없으면 빈 문자열. 모든 카드에 다 넣지 말 것.",
+                        },
+                        "box_style": {
+                            "type": "string",
+                            "enum": ["light", "dark"],
+                            "description": "heading/point 박스를 흰 배경(light)으로 할지 짙은 반투명 배경(dark)으로 할지. 사진에서 박스가 놓일 자리(대개 사진 위쪽)가 밝고 화사하면 dark를, 어둡거나 색이 짙으면 light를 골라서 사진 톤과 대비되게 하세요.",
+                        },
+                        "align": {
+                            "type": "string",
+                            "enum": ["left", "right"],
+                            "description": "heading/point 박스를 화면 왼쪽에 붙일지 오른쪽에 붙일지. 사진 속 인물/피사체가 없는 쪽(여백)에 배치하세요.",
                         },
                     },
-                    "required": ["index", "cover_title", "heading", "body", "point"],
+                    "required": ["index", "cover_title", "cover_align", "heading", "body", "point", "box_style", "align"],
                 },
             },
         },
@@ -537,21 +584,24 @@ def annotate_cards(client: anthropic.Anthropic, script: dict, manifest: list) ->
     if not manifest:
         return {}
 
-    system_prompt = """당신은 스킨케어 카드뉴스의 디자이너 보조입니다. 각 카드의 실제 사진과
-문구를 같이 보고 판단하세요. PM 승인을 받은 본문 문장 자체(** 강조 마크 제외)는
-절대 바꾸지 마세요. 카드마다 해당 없는 필드는 빈 문자열("")로 두세요 — 모든
-카드에 모든 요소를 다 넣을 필요는 없습니다. 오히려 필요 없는데 억지로 채우면
-안 됩니다.
+    system_prompt = """당신은 스킨케어 카드뉴스의 디자이너입니다. 각 카드의 실제 사진과 문구를
+같이 보고 판단하세요. PM 승인을 받은 본문 문장 자체(** 강조 마크 제외)는 절대
+바꾸지 마세요. 카드마다 해당 없는 필드는 빈 문자열("")로 두세요 — 모든 카드에
+모든 요소를 다 넣을 필요는 없습니다. 오히려 필요 없는데 억지로 채우면 안
+됩니다. 카드 9장 전체를 쭉 보면서 스타일이 다 똑같이 반복되지 않게(예: 박스
+색이나 좌우 위치가 카드마다 항상 같지 않게) 사진마다 어울리는 선택을 하세요.
 
 - cover_title (표지 카드에만): 원래 hook 문장은 카드 안에서 읽는 대사체라
   길고 늘어지는 경우가 많습니다. 표지 이미지에 큼직하게 들어갈 제목은 그
   문장을 그대로 쓰지 말고, 스크롤을 멈추게 할 만큼 짧고 강렬하게(5~14자
-  정도) 새로 뽑으세요. 완전한 문장이 아니어도 됩니다. 사진 분위기도 참고해서
-  톤을 맞추세요.
+  정도) 새로 뽑으세요. 완전한 문장이 아니어도 됩니다. 그 안에서 가장 강조할
+  단어/구절 하나는 **로 감싸도 됩니다(예: "번들거림의 **진짜 이유**").
+- cover_align (표지 카드에만): 사진 속 인물/피사체가 어디 있는지 보고 제목이
+  겹치지 않을 위치를 고르세요.
 - heading (본문 카드에만): 사진+문구를 같이 보고, 짧은 제목 하나가 이 카드를
   더 잘 전달한다고 판단될 때만(4~14자) 채우세요. 문장 자체가 이미 짧고
   명확하거나, 사진이 이미 내용을 충분히 보여주면 억지로 만들지 말고 빈
-  문자열로 두세요.
+  문자열로 두세요. 카드 9장 중 절반 이상은 비워도 괜찮습니다.
 - body (본문 카드에만): 원문 문장을 토씨 하나 바꾸지 말고 그대로 두되, 그 중
   가장 중요한 구간 한두 곳만 **로 감싸서 강조하세요(예: "**수분 부족**이
   원인"). 강조할 만한 곳이 뚜렷하지 않으면 강조 없이 원문 그대로 반환해도
@@ -559,6 +609,9 @@ def annotate_cards(client: anthropic.Anthropic, script: dict, manifest: list) ->
 - point (본문 카드에만): 한 줄로 뽑아낼 만한 뚜렷한 핵심 포인트(6~16자)가
   있을 때만 적으세요. 정보 전달용 카드엔 자연스럽게 어울리지만, 공감/전환
   유도용 문장에는 억지로 만들지 마세요.
+- box_style/align (본문 카드에만, heading이나 point를 하나라도 채웠을 때만
+  의미 있음): 그 카드 사진을 보고 박스가 사진 톤과 잘 대비되도록, 그리고
+  인물/피사체를 가리지 않는 여백 쪽에 오도록 고르세요.
 
 submit_annotations 도구로만 응답하세요."""
 
@@ -592,9 +645,12 @@ submit_annotations 도구로만 응답하세요."""
                     body = original
                 result[idx] = {
                     "cover_title": (c.get("cover_title") or "").strip() or None,
+                    "cover_align": c.get("cover_align") if c.get("cover_align") in ("bottom-left", "center", "top-left") else None,
                     "heading": (c.get("heading") or "").strip() or None,
                     "annotated_text": body,
                     "point": (c.get("point") or "").strip() or None,
+                    "box_style": c.get("box_style") if c.get("box_style") in ("light", "dark") else "light",
+                    "box_align": c.get("align") if c.get("align") in ("left", "right") else "left",
                 }
             return result
     return {}
@@ -604,25 +660,58 @@ submit_annotations 도구로만 응답하세요."""
 # 3종 템플릿
 # ---------------------------------------------------------------------------
 
-def render_header_card(card: dict, fonts: dict) -> Image.Image:
-    """1번 카드(표지) 템플릿: 큰 제목을 하단 세이프존에 왼쪽 정렬로 배치한다
-    (참고 레퍼런스의 표지 구성 — 가운데 정렬 대신 하단좌측).
+def _title_font_size(title_text: str) -> int:
+    """제목 글자 수에 따라 표지 폰트 크기를 동적으로 키운다. 표지 제목을
+    짧고 강렬하게 뽑아도(cover_title) 항상 같은 크기(72px)로만 찍으면
+    "임팩트가 없다"는 인상을 줘서, 짧을수록 더 큼직하게 키워 포스터처럼
+    보이게 한다. **/공백을 뺀 순수 글자 수 기준."""
+    visible_len = len(re.sub(r"\*\*", "", title_text).replace(" ", ""))
+    if visible_len <= 8:
+        return 108
+    if visible_len <= 14:
+        return 86
+    return TITLE_SIZE
 
-    제목은 대본의 hook 문장을 그대로 쓰지 않는다 — hook은 "얼굴은 번들거리는데
-    속은 당기고... 이거 저만 그런가요?ㅠㅠ" 처럼 카드 안에서 읽는 대사체라
-    표지 이미지 제목으로 쓰기엔 길고 늘어진다는 피드백을 받았다. 대신
-    annotate_cards()가 만든 cover_title(짧고 강렬한 제목)을 쓰고, 없으면
-    (API 키 없음 등) hook 원문으로 폴백한다."""
+
+def render_header_card(card: dict, fonts: dict) -> Image.Image:
+    """1번 카드(표지) 템플릿. 제목은 대본의 hook 문장을 그대로 쓰지 않는다 —
+    hook은 "얼굴은 번들거리는데 속은 당기고... 이거 저만 그런가요?ㅠㅠ" 처럼
+    카드 안에서 읽는 대사체라 표지 이미지 제목으로 쓰기엔 길고 늘어진다는
+    피드백을 받았다. 대신 annotate_cards()가 만든 cover_title(짧고 강렬한
+    제목)을 쓰고, 없으면(API 키 없음 등) hook 원문으로 폴백한다.
+
+    제목이 짧을수록 폰트를 더 키우고(_title_font_size), cover_align에 따라
+    표지 사진 구도에 맞는 배치(하단좌측/가운데/상단좌측) 중 하나를 쓴다 —
+    표지가 매번 똑같은 자리에 똑같은 크기로만 나오면 임팩트가 없다는 피드백
+    반영. 사진에 여백이 없을 때(annotate_cards가 판단 못 했을 때)는 기존
+    방식(하단좌측)으로 안전하게 폴백한다."""
     title_text = card.get("cover_title") or card["text"]
-    lines = wrap_tokens(title_text, fonts["title"], CONTENT_WIDTH)
-    line_height = int(TITLE_SIZE * 1.25)
-    title_top = SAFE_BOTTOM - line_height * len(lines)
+    align = card.get("cover_align") or "bottom-left"
+
+    size = _title_font_size(title_text)
+    title_font = fonts["title_maker"](size)
+    line_height = int(size * 1.25)
+
+    x_align = "center" if align == "center" else "left"
+    lines = wrap_tokens(title_text, title_font, CONTENT_WIDTH if align != "center" else int(CONTENT_WIDTH * 0.85))
+    block_height = line_height * len(lines)
+
+    if align == "top-left":
+        title_top = SAFE_TOP + CONTENT_TOP_PAD
+        band = (title_top - 40, title_top + block_height + 60, 195)
+    elif align == "center":
+        title_top = SAFE_TOP + (SAFE_BOTTOM - SAFE_TOP - block_height) // 2
+        band = (title_top - 50, title_top + block_height + 60, 210)
+    else:  # bottom-left
+        title_top = SAFE_BOTTOM - block_height
+        band = (title_top, CANVAS_H, 205)
 
     bg = load_background(card.get("local_path"))
-    bg = add_scrim(bg, bands=[(title_top, CANVAS_H, 205)])
+    bg = add_scrim(bg, bands=[band])
     draw = ImageDraw.Draw(bg)
 
-    draw_wrapped(draw, lines, CONTENT_MARGIN_X, title_top, line_height, align="left", font_normal=fonts["title"])
+    x = CANVAS_W // 2 if x_align == "center" else CONTENT_MARGIN_X
+    draw_wrapped(draw, lines, x, title_top, line_height, align=x_align, font_normal=title_font)
 
     return bg.convert("RGB")
 
@@ -643,6 +732,9 @@ def render_body_card(card: dict, fonts: dict) -> Image.Image:
     heading = card.get("heading")
     point = card.get("point")
     body_text = card.get("annotated_text") or card["text"]
+    box_style = card.get("box_style", "light")
+    box_align = card.get("box_align", "left")
+    edge_x = CONTENT_MARGIN_X if box_align == "left" else CANVAS_W - CONTENT_MARGIN_X
 
     body_lines = wrap_tokens(body_text, fonts["body"], CONTENT_WIDTH)
     body_line_height = int(BODY_SIZE * 1.5)
@@ -653,9 +745,9 @@ def render_body_card(card: dict, fonts: dict) -> Image.Image:
     # 스크림도 최종 본문 위치에 맞춰 미리 깔 수 있다.
     y = SAFE_TOP + CONTENT_TOP_PAD
     if heading:
-        y = render_box_text(_MEASURE_DRAW, heading, CONTENT_MARGIN_X, y, fonts["heading"], CONTENT_WIDTH)
+        y = render_box_text(_MEASURE_DRAW, heading, edge_x, y, fonts["heading"], CONTENT_WIDTH, style=box_style, align=box_align)
     if point:
-        y = render_box_text(_MEASURE_DRAW, point, CONTENT_MARGIN_X, y, fonts["point"], CONTENT_WIDTH, prefix="→ ", text_color=COLOR_POINT_TEXT)
+        y = render_box_text(_MEASURE_DRAW, point, edge_x, y, fonts["point"], CONTENT_WIDTH, prefix="→ ", style=box_style, align=box_align, is_point=True)
     top_block_bottom = y
 
     body_top = SAFE_BOTTOM - body_block_height
@@ -668,9 +760,9 @@ def render_body_card(card: dict, fonts: dict) -> Image.Image:
 
     y = SAFE_TOP + CONTENT_TOP_PAD
     if heading:
-        y = render_box_text(draw, heading, CONTENT_MARGIN_X, y, fonts["heading"], CONTENT_WIDTH)
+        y = render_box_text(draw, heading, edge_x, y, fonts["heading"], CONTENT_WIDTH, style=box_style, align=box_align)
     if point:
-        y = render_box_text(draw, point, CONTENT_MARGIN_X, y, fonts["point"], CONTENT_WIDTH, prefix="→ ", text_color=COLOR_POINT_TEXT)
+        y = render_box_text(draw, point, edge_x, y, fonts["point"], CONTENT_WIDTH, prefix="→ ", style=box_style, align=box_align, is_point=True)
 
     draw_wrapped(
         draw, body_lines, CONTENT_MARGIN_X, body_top, body_line_height,
