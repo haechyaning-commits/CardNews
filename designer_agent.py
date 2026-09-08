@@ -7,11 +7,10 @@ crop_images.py가 만들어둔 로컬 이미지(crop_manifest.json + images/, �
 
 - 전체 슬라이드 4:5(1080x1350) 고정 — crop_images.py가 이미 보장하므로 여기선 그대로 사용.
 - 템플릿 3종 고정: 헤더(표지) / 본문(슬라이드) / 마무리(CTA+댓글유도+핸들).
-- 폰트 최대 2종(제목 1개 + 본문 1개, 굵기로 위계). 색상은 흰/짙은 텍스트 / 포인트색
-  3가지로 고정.
-- 사진 위에 얹는 텍스트는 전부 완전 불투명한 박스 안에 넣어서, 사진이 밝든
-  어둡든 가독성이 항상 확보되게 한다(render_box_text) — v5부터는 그라데이션
-  스크림을 아예 안 쓴다(아래 참고).
+- 폰트 최대 2종(제목 1개 + 본문 1개, 굵기로 위계). 색상은 흰 텍스트 / 포인트색 /
+  어두운 스크림(반투명 박스 역할) 3가지로 고정.
+- 사진 위에 얹는 텍스트는 항상 어두운 그라데이션 스크림이나 반투명 박스 뒤에
+  놓아서, 사진이 밝든 어둡든 가독성이 항상 확보되게 한다.
 - 상하 15%는 프로필 아이콘/캡션 UI에 가려질 수 있는 세이프존이라 핵심 텍스트는
   그 안쪽에 배치한다.
 
@@ -37,29 +36,11 @@ crop_images.py가 만들어둔 로컬 이미지(crop_manifest.json + images/, �
   "같은 시스템, 다른 내용"으로 일관성을 줌.
 - "표지에 임팩트가 없다, 디자인이 단조롭다, 박스 색/위치를 사진에 맞게
   유연하게, 디자이너로서 판단해라" → 표지 제목을 글자 수에 따라 동적으로
-  키우고(_title_font_size) 사진 구도에 맞춰 배치를 씀. 본문 카드의 요약
-  제목/포인트 박스도 흰색 하나로 고정하지 않고 light/dark 두 배색과 좌/우
-  위치 중 Claude가 그 카드 사진을 보고 고르게 함(BOX_STYLES, box_style/align).
-
-v5: 실제 사진으로 여러 주제를 돌려본 뒤 받은 피드백을 반영해서 또 크게 고쳤다.
-- "글씨 뒤에 검은 배경 같은 게 다 이상하다" → 어두운 그라데이션 스크림
-  (add_scrim/add_full_scrim)을 완전히 제거했다. 표지 제목/본문 문단/마무리
-  CTA까지 모든 텍스트를 render_box_text의 완전 불투명 박스 안에만 넣는다 —
-  사진 절반을 어둡게 덮어씌우던 큰 그라데이션 대신, 텍스트 크기에 딱 맞는
-  작은 박스만 남아서 사진이 훨씬 많이 보인다.
-- "표지 제목이 사진 속 인물과 겹친다, 하단좌측이나 가운데였으면" → 표지
-  배치(cover_align)에서 얼굴/머리카락과 자주 겹치던 top-left 옵션을 빼고
-  bottom-left/center 둘만 남겼다.
-- "왜 자꾸 글씨가 주황색이냐, 사진도 이미 웜톤인데" → 포인트색(COLOR_ACCENT)
-  사용 범위를 크게 줄였다. 본문 문단의 **강조**는 이제 색이 아니라 굵기로만
-  표시하고(accent_color를 기본 텍스트색과 같게 줌), 마무리 CTA도 더는 전체를
-  포인트색으로 안 찍는다. 포인트색은 표지 제목의 핵심 단어 한 군데, 포인트
-  칩처럼 정말 의도된 강조에만 남겼다.
-- "1, 2, 3 뒤에 네모로 깨진다" → Claude가 번호 매기려고 이모지(1️⃣2️⃣3️⃣)나
-  원문자(①②③)를 쓰면 우리 한글 폰트에 그 글리프가 없어서 깨지는 버그였다.
-  _strip_unrenderable()로 문제가 됐던 유니코드 대역(이모지, variation
-  selector, combining keycap, 원문자)을 코드로 걸러내고, 프롬프트에도 대신
-  "1." 같은 일반 숫자를 쓰라고 안내를 추가했다.
+  키우고(_title_font_size) 사진 구도에 맞춰 3가지 배치(하단좌측/가운데/
+  상단좌측) 중 하나를 씀. 본문 카드의 요약 제목/포인트 박스도 흰색 하나로
+  고정하지 않고 light/dark 두 배색과 좌/우 위치 중 Claude가 그 카드 사진을
+  보고 고르게 함(BOX_STYLES, box_style/align) — 매 카드가 똑같은 자리에
+  똑같은 색으로만 나오지 않도록.
 
 이 표지 제목/정렬, 요약 제목/포인트와 그 배색·위치, 강조 구간은 문장을 새로
 쓰는 게 아니라 "무엇이 필요한지·어디에 어떻게 놓을지"를 판단하는 작업이라
@@ -132,33 +113,27 @@ CONTENT_WIDTH = CANVAS_W - CONTENT_MARGIN_X * 2
 # 아닌 라벨이 카드에 들어가는 게 이상하다"는 피드백을 받고 태그 자체를 없앴다.
 CONTENT_TOP_PAD = 16
 
-# 색상 팔레트. v5부터는 어두운 그라데이션 스크림을 안 쓴다 — 예전엔 스크림을
-# 사진 절반에 깔고 그 위에 흰 텍스트를 놓았는데, "글씨 뒤에 검은 배경 같은
-# 게 다 이상하다"는 피드백을 받았다. 표지 제목/요약 제목/포인트 칩/마무리
-# CTA는 딱 맞는 크기의 완전 불투명한 박스 안에 넣고(render_box_text), 본문
-# 문단만은 박스 없이 사진 위에 바로 쓴다 — 대신 글자 테두리(스트로크)로
-# 대비를 보장한다(draw_wrapped의 stroke_width, render_body_card 참고).
-#
-# light(흰 배경+짙은 텍스트) / dark(짙은 배경+흰 텍스트) 두 버전이 있지만,
-# 카드마다 따로 고르지 않고 카드 세트 전체에 "딱 하나"만 정해서 통일한다
-# (build_cards에서) — 사진수집가가 세트 톤을 한 번만 정하는 것과 같은 원리.
-# 카드마다 흰 박스/검정 박스가 섞이면 오히려 산만하고 통일감이 없어 보인다는
-# 피드백을 받았다.
-COLOR_TEXT = (255, 255, 255)
-# 포인트색(웜톤)은 이제 카드 전체에 넓게 쓰지 않고, "정말 강조하고 싶은
-# 한 군데"(표지 제목의 핵심 단어, 포인트 칩)에만 아껴 쓴다 — 본문 문장의
-# 볼드 강조나 킥커 문구까지 전부 주황색이던 걸 "왜 자꾸 주황색이냐, 사진도
-# 이미 웜톤인데"라는 피드백을 받고 줄였다. 본문 볼드는 이제 색이 아니라
-# 굵기로만 강조한다.
-COLOR_ACCENT = (232, 176, 132)
-COLOR_SCRIM = (36, 22, 17)  # 짙은 배경(dark 박스)에 쓰는 계정 고유 웜 브라운
-COLOR_STROKE = (20, 14, 11)  # 박스 없이 사진 위에 바로 얹는 본문 글자의 테두리색
+# 색상 팔레트. 사진 위에 바로 얹는 텍스트(스크림 뒤)는 흰 텍스트 / 포인트색을
+# 고정으로 쓴다. 요약 제목/포인트 박스는 light(흰 배경+짙은 텍스트) / dark(짙은
+# 반투명 배경+흰 텍스트) 두 버전이 있지만, 카드마다 따로 고르지 않고 카드
+# 세트 전체에 "딱 하나"만 정해서 통일한다(build_cards에서) — 사진수집가가
+# 세트 톤을 한 번만 정하는 것과 같은 원리. 카드마다 흰 박스/검정 박스가
+# 섞이면 오히려 산만하고 통일감이 없어 보인다는 피드백을 받았다.
+COLOR_TEXT = (255, 255, 255, 255)
+COLOR_ACCENT = (232, 176, 132, 255)
+# 순검정에 가까우면 사진 위에서 "이질적인 검은 박스"처럼 붕 떠 보인다는
+# 피드백을 받고, 계정 고유 웜톤과 어울리게 붉은기를 더 살린 짙은 브라운으로
+# 조정했다(예전 (20,15,12) → 지금 (36,22,17)).
+COLOR_SCRIM = (36, 22, 17)
 
-# 테두리 선 없이 배경색만 채운다 — 선으로 둘러싸이는 느낌이 싫다는 피드백을
-# 받고 뺐다. 완전 불투명이라(반투명 아님) 사진이 어떻든 대비가 항상 보장된다.
+# light 버전: 밝은 사진 위에서도 항상 또렷한 흰 박스+짙은 텍스트(참고
+# 레퍼런스 스타일). dark 버전: 사진이 이미 밝고 화사해서 흰 박스를 얹으면
+# 튀거나 밋밋해 보일 때, 사진 톤에 자연스럽게 녹아드는 짙은 반투명 박스+흰
+# 텍스트. 테두리 선 없이 배경색만 채운다 — 선으로 둘러싸이는 느낌이 싫다는
+# 피드백을 받고 뺐다.
 BOX_STYLES = {
-    "light": {"bg": (255, 255, 255), "text": (24, 20, 18), "point_text": (168, 88, 40)},
-    "dark": {"bg": COLOR_SCRIM, "text": (255, 255, 255), "point_text": (232, 176, 132)},
+    "light": {"bg": (255, 255, 255, 235), "text": (24, 20, 18, 255), "point_text": (168, 88, 40, 255)},
+    "dark": {"bg": (*COLOR_SCRIM, 210), "text": (255, 255, 255, 255), "point_text": (232, 176, 132, 255)},
 }
 
 TITLE_SIZE = 72    # 표지 hook / 마무리 CTA
@@ -361,8 +336,6 @@ def draw_wrapped(
     font_accent: ImageFont.FreeTypeFont = None,
     fill_normal=COLOR_TEXT,
     fill_accent=COLOR_ACCENT,
-    stroke_width: int = 0,
-    stroke_fill=None,
 ) -> int:
     """wrap_tokens()가 만든 줄들을 그리고, 마지막 줄 다음 y좌표를 반환한다
     (다음 텍스트 블록을 이어붙일 때 씀). align="left"면 x를 왼쪽 기준선으로,
@@ -371,11 +344,7 @@ def draw_wrapped(
     강조할 수 있다 — font_accent를 안 주면 font_normal과 같은 폰트를 쓰고
     fill_accent 색으로만 구분된다. 한 단어 안에 서식이 다른 런이 여러 개
     있어도(예: "클렌저"(볼드)+"로"(보통)) 그 사이엔 공백을 넣지 않고 이어
-    그린다 — 단어와 단어 사이에만 공백 하나를 둔다.
-
-    stroke_width>0이면 글자 테두리를 그린다 — 박스/스크림 없이 사진 위에
-    텍스트를 바로 얹을 때(본문 문단), 사진이 밝든 어둡든 상관없이 읽히게
-    하는 용도다(박스 없이도 대비가 보장되는 흔한 기법)."""
+    그린다 — 단어와 단어 사이에만 공백 하나를 둔다."""
     font_accent = font_accent or font_normal
     space_w = draw.textlength(" ", font=font_normal)
 
@@ -390,10 +359,7 @@ def draw_wrapped(
         for word_runs in line:
             for chunk, accent in word_runs:
                 font = font_accent if accent else font_normal
-                draw.text(
-                    (cursor, y), chunk, font=font, fill=fill_accent if accent else fill_normal,
-                    stroke_width=stroke_width, stroke_fill=stroke_fill,
-                )
+                draw.text((cursor, y), chunk, font=font, fill=fill_accent if accent else fill_normal)
                 cursor += draw.textlength(chunk, font=font)
             cursor += space_w
         y += line_height
@@ -401,23 +367,67 @@ def draw_wrapped(
 
 
 # ---------------------------------------------------------------------------
-# 배경(사진 또는 대체 배경) + 박스 라벨
+# 배경(사진 또는 대체 배경) + 스크림 + 박스 라벨
 # ---------------------------------------------------------------------------
 
 def load_background(local_path) -> Image.Image:
     """카드에 배정된 사진을 1080x1350 그대로 불러온다. 사진수집가/크롭 단계에서
     이미지를 못 찾은 카드(local_path가 None)라도 전체 파이프라인이 죽지 않게,
-    계정 웜+뮤트 톤과 어울리는 짙은 단색 배경으로 대체한다. v5부터는 텍스트를
-    전부 불투명 박스 안에 넣으므로(스크림 그라데이션 없음) 알파 채널이 필요
-    없어 RGB로 바로 반환한다."""
+    계정 웜+뮤트 톤과 어울리는 짙은 단색 배경으로 대체한다."""
     if local_path:
         img_path = PROJECT_DIR / local_path
         if img_path.exists():
             img = Image.open(img_path).convert("RGB")
             if img.size != (CANVAS_W, CANVAS_H):
                 img = img.resize((CANVAS_W, CANVAS_H), Image.LANCZOS)
-            return img
-    return Image.new("RGB", (CANVAS_W, CANVAS_H), COLOR_SCRIM)
+            return img.convert("RGBA")
+    return Image.new("RGBA", (CANVAS_W, CANVAS_H), (*COLOR_SCRIM, 255))
+
+
+def _band_opacity(y: int, band_top: int, band_bottom: int, max_opacity: int, fade: int, min_opacity: int) -> float:
+    """band_top~band_bottom 구간은 max_opacity, 그 위아래 fade 구간은
+    min_opacity까지 서서히 옅어지고, 더 벗어난 곳은 min_opacity로 깔린다."""
+    fade_in_start = max(0, band_top - fade)
+    fade_out_end = band_bottom + fade
+    if band_top <= y <= band_bottom:
+        return max_opacity
+    if y < band_top:
+        if y <= fade_in_start:
+            return min_opacity
+        t = (y - fade_in_start) / max(1, band_top - fade_in_start)
+        return min_opacity + (max_opacity - min_opacity) * t
+    if y >= fade_out_end:
+        return min_opacity
+    t = (fade_out_end - y) / max(1, fade_out_end - band_bottom)
+    return min_opacity + (max_opacity - min_opacity) * t
+
+
+def add_scrim(img: Image.Image, bands: list, fade: int = 160, min_opacity: int = 40) -> Image.Image:
+    """텍스트 블록이 있는 자리(band)만 어두워지는 스크림을 한 번에 깐다.
+    bands는 [(band_top, band_bottom, max_opacity), ...] 목록. band_bottom을
+    이미지 높이로 주면(표지/본문 하단처럼 텍스트가 맨 아래까지 이어질 때)
+    아래쪽은 옅어지지 않고 가장자리까지 쭉 어둡게 유지된다."""
+    w, h = img.size
+    gradient = Image.new("L", (1, h), 0)
+    for y in range(h):
+        v = max(
+            (_band_opacity(y, max(0, top), min(h, bottom), opacity, fade, min_opacity) for top, bottom, opacity in bands),
+            default=min_opacity,
+        )
+        gradient.putpixel((0, y), int(v))
+    gradient = gradient.resize((w, h))
+    scrim = Image.new("RGBA", (w, h), (*COLOR_SCRIM, 255))
+    scrim.putalpha(gradient)
+    return Image.alpha_composite(img, scrim)
+
+
+def add_full_scrim(img: Image.Image, opacity: int) -> Image.Image:
+    """전체 화면에 균일한 반투명 검정을 깐다. 마무리 카드처럼 사진 위 전체에
+    텍스트가 올라가는 경우, 위쪽만 어두운 그라데이션보다 균일한 스크림이 더
+    안정적으로 읽힌다."""
+    w, h = img.size
+    scrim = Image.new("RGBA", (w, h), (*COLOR_SCRIM, opacity))
+    return Image.alpha_composite(img, scrim)
 
 
 def render_box_text(
@@ -431,30 +441,21 @@ def render_box_text(
     style: str = "light",
     align: str = "left",
     is_point: bool = False,
-    font_accent: ImageFont.FreeTypeFont = None,
-    accent_color=None,
 ) -> int:
-    """텍스트를 줄바꿈해서 그 블록 크기에 딱 맞는 완전 불투명 박스를 뒤에
-    깔고 그린다. 표지 제목/요약 제목/포인트 칩/본문까지 모든 텍스트가 이
-    함수를 공유해서 "사진이 어떻든 항상 또렷하게 읽히는 박스"라는 같은 시각
-    언어를 쓴다 — v5부터는 어두운 그라데이션 스크림을 아예 없애고 텍스트를
-    전부 이 박스 안에만 넣는다("글씨 뒤에 검은 배경 같은 게 다 이상하다"는
-    피드백 반영).
+    """텍스트를 줄바꿈해서 그 블록 크기에 딱 맞는 각진 테두리 박스를 뒤에
+    깔고 그린다. 요약 제목/포인트 칩이 이 함수를 공유해서 "사진 밝기와
+    무관하게 항상 읽히는 박스 라벨"이라는 같은 시각 언어를 쓴다.
 
-    style("light"/"dark")은 카드 세트 전체에서 통일해서 쓰고, align은
-    "left"/"right"/"center" 중 카드마다 사진 구도에 맞게 달라질 수 있다.
-    align="right"면 edge_x를 "오른쪽 여백선"으로 보고 박스를 거기서부터
-    왼쪽으로 채우고, "center"면 edge_x를 가운데 기준으로 좌우 대칭으로
-    채운다. font_accent/accent_color를 주면 텍스트 안의 **강조** 구간만
-    다른 폰트/색으로 그린다(둘 다 안 주면 강조 표시가 있어도 시각적으로
-    구분 안 됨 — 즉 강조를 색으로 할지 굵기로만 할지 호출하는 쪽이 정한다).
-    이 함수를 안 부르면(heading/point가 없을 때) 박스 자체가 카드에 안
-    들어간다 — 모든 카드에 박스를 강제로 넣지 않는다. 다음 요소를 이어붙일
-    y좌표(여백 포함)를 반환한다."""
+    style("light"/"dark")과 align("left"/"right")은 카드마다 사진을 보고
+    Claude가 고른 값을 그대로 받는다 — 박스가 모든 카드에서 항상 흰색·왼쪽
+    상단으로 똑같이 나오면 단조롭다는 피드백을 받고, 사진 톤/구도에 맞춰
+    박스 배색과 좌우 위치가 카드마다 달라지게 했다. align="right"면 edge_x를
+    "오른쪽 여백선"으로 보고 박스를 거기서부터 왼쪽으로 채운다(반대로
+    "left"면 edge_x가 왼쪽 시작선). 이 함수를 안 부르면(heading/point가
+    없을 때) 박스 자체가 카드에 안 들어간다 — 모든 카드에 박스를 강제로
+    넣지 않는다. 다음 요소를 이어붙일 y좌표(여백 포함)를 반환한다."""
     colors = BOX_STYLES.get(style, BOX_STYLES["light"])
     text_color = colors["point_text"] if is_point else colors["text"]
-    font_accent = font_accent or font
-    accent_color = accent_color if accent_color is not None else text_color
 
     full_text = f"{prefix}{text}" if prefix else text
     lines = wrap_tokens(full_text, font, max_width)
@@ -466,28 +467,16 @@ def render_box_text(
     space_w = draw.textlength(" ", font=font)
 
     def line_width(line):
-        word_ws = [sum(draw.textlength(chunk, font=(font_accent if a else font)) for chunk, a in word) for word in line]
+        word_ws = [sum(draw.textlength(chunk, font=font) for chunk, _ in word) for word in line]
         return sum(word_ws) + space_w * max(0, len(line) - 1)
 
     max_line_w = max(line_width(line) for line in lines)
     last_line_bottom = top_y + (len(lines) - 1) * line_height + font.size
 
-    if align == "right":
-        text_x, draw_align = edge_x - max_line_w, "left"
-        box_left, box_right = text_x - pad_x, edge_x + pad_x
-    elif align == "center":
-        text_x, draw_align = edge_x, "center"
-        box_left, box_right = edge_x - max_line_w / 2 - pad_x, edge_x + max_line_w / 2 + pad_x
-    else:  # left
-        text_x, draw_align = edge_x, "left"
-        box_left, box_right = text_x - pad_x, text_x + max_line_w + pad_x
-
-    box = [box_left, top_y - pad_y, box_right, last_line_bottom + pad_y]
+    text_x = edge_x if align == "left" else edge_x - max_line_w
+    box = [text_x - pad_x, top_y - pad_y, text_x + max_line_w + pad_x, last_line_bottom + pad_y]
     draw.rectangle(box, fill=colors["bg"])  # 테두리 선 없이 배경색만 채운다 — 선으로 둘러싸인 느낌이 싫다는 피드백
-    draw_wrapped(
-        draw, lines, text_x, top_y, line_height, align=draw_align,
-        font_normal=font, font_accent=font_accent, fill_normal=text_color, fill_accent=accent_color,
-    )
+    draw_wrapped(draw, lines, text_x, top_y, line_height, align="left", font_normal=font, fill_normal=text_color)
 
     return int(box[3]) + 20
 
@@ -523,8 +512,8 @@ ANNOTATE_TOOL = {
                         },
                         "cover_align": {
                             "type": "string",
-                            "enum": ["bottom-left", "center"],
-                            "description": "표지 사진을 보고 제목(+킥커)을 어디에 놓을지. 사진이 비교적 비어있고 임팩트를 줄 수 있으면 center, 그 외엔(인물/피사체가 뚜렷하면) bottom-left. 표지가 아니면 아무 값이나 둬도 무시됨.",
+                            "enum": ["bottom-left", "center", "top-left"],
+                            "description": "표지 사진을 보고 제목(+킥커)을 어디에 놓을지. 인물/피사체가 이미 화면 아래쪽에 있으면 top-left, 사진이 비교적 비어있고 임팩트를 줄 수 있으면 center, 그 외엔 bottom-left. 표지가 아니면 아무 값이나 둬도 무시됨.",
                         },
                         "heading": {
                             "type": "string",
@@ -585,27 +574,6 @@ def _normalize_for_compare(text: str) -> str:
     return " ".join(text.split())
 
 
-# Claude가 요약 제목/포인트 등에 번호 매기려고 이모지(1️⃣2️⃣3️⃣)나 원문자
-# (①②③)를 쓰는 경우가 있는데, 우리가 쓰는 한글 폰트(Noto Sans KR 등)에는
-# 이런 글리프가 없어서 네모(tofu)로 깨져 보인다("1 뒤에 네모 두 개 나온다"는
-# 피드백의 원인 — DIGIT ONE 자체는 폰트에 있어서 숫자는 멀쩡히 나오고, 그
-# 뒤에 붙는 variation selector/키캡 결합 문자만 깨진 것). 프롬프트로
-# "이런 기호 쓰지 마세요"라고만 하면 또 빠뜨릴 수 있으니, 실제로 문제가
-# 됐던 유니코드 대역을 코드로 걸러낸다.
-_UNRENDERABLE_RANGES = (
-    (0x1F000, 0x1FFFF),  # 이모지 전반
-    (0x2600, 0x27BF),    # 기타 심볼/딩벳(이모지 계열 포함)
-    (0xFE00, 0xFE0F),    # variation selector
-    (0x20E3, 0x20E3),    # combining enclosing keycap ("1️⃣"의 그 부분)
-    (0x2460, 0x24FF),    # 원문자/괄호숫자(①②③ 등)
-)
-
-
-def _strip_unrenderable(text: str) -> str:
-    """폰트에 글리프가 없어서 네모로 깨지는 문자를 지운다."""
-    return "".join(ch for ch in text if not any(lo <= ord(ch) <= hi for lo, hi in _UNRENDERABLE_RANGES))
-
-
 def annotate_cards(client: anthropic.Anthropic, script: dict, manifest: list) -> dict:
     """카드마다(표지 포함) 실제로 배정된 사진과 문구를 같이 Claude에게 보여주고
     (1) 표지면 짧고 강렬한 표지 제목 (2) 본문이면 필요할 때만 요약 제목/포인트
@@ -655,9 +623,6 @@ def annotate_cards(client: anthropic.Anthropic, script: dict, manifest: list) ->
   단어/구절 하나는 **로 감싸도 됩니다(예: "번들거림의 **진짜 이유**").
 - cover_align (표지 카드에만): 사진 속 인물/피사체가 어디 있는지 보고
   제목(+킥커)이 겹치지 않을 위치를 고르세요.
-- 번호를 매길 일이 있으면(heading, point 등) 이모지 번호(1️⃣2️⃣3️⃣)나
-  원문자(①②③) 대신 "1.", "2." 처럼 일반 숫자+마침표를 쓰거나, 아예 번호
-  없이 쓰세요. 이모지/원문자는 폰트에 글리프가 없어서 네모로 깨져 보입니다.
 - heading (본문 카드에만): 사진+문구를 같이 보고, 짧은 제목 하나가 이 카드를
   더 잘 전달한다고 판단될 때만(4~14자) 채우세요. 문장 자체가 이미 짧고
   명확하거나, 사진이 이미 내용을 충분히 보여주면 억지로 만들지 말고 빈
@@ -711,12 +676,12 @@ submit_annotations 도구로만 응답하세요."""
                     print(f"    (카드 {idx}: 강조하면서 원문이 살짝 달라져서 강조 없이 원문 그대로 사용)")
                     body = original
                 result[idx] = {
-                    "cover_kicker": _strip_unrenderable((c.get("cover_kicker") or "").strip()) or None,
-                    "cover_title": _strip_unrenderable((c.get("cover_title") or "").strip()) or None,
-                    "cover_align": c.get("cover_align") if c.get("cover_align") in ("bottom-left", "center") else None,
-                    "heading": _strip_unrenderable((c.get("heading") or "").strip()) or None,
+                    "cover_kicker": (c.get("cover_kicker") or "").strip() or None,
+                    "cover_title": (c.get("cover_title") or "").strip() or None,
+                    "cover_align": c.get("cover_align") if c.get("cover_align") in ("bottom-left", "center", "top-left") else None,
+                    "heading": (c.get("heading") or "").strip() or None,
                     "annotated_text": body,
-                    "point": _strip_unrenderable((c.get("point") or "").strip()) or None,
+                    "point": (c.get("point") or "").strip() or None,
                     "box_style": set_box_style,
                     "box_align": c.get("align") if c.get("align") in ("left", "right") else "left",
                     "box_vpos": c.get("box_vpos") if c.get("box_vpos") in ("top", "middle") else "top",
@@ -751,144 +716,144 @@ def render_header_card(card: dict, fonts: dict) -> Image.Image:
 
     제목 바로 위에 작은 킥커 문구(cover_kicker, 예: "지성 피부 관리법")를
     한 줄 더 얹는다 — 제목 한 줄만 있으면 "뭔 내용인지 감이 안 와서 밍밍하다"는
-    피드백을 받았다. 킥커+제목 둘 다 render_box_text로 그려서(스크림이 아니라
-    불투명 박스) 사진이 어떻든 항상 또렷하다.
+    피드백을 받았다. 참고 레퍼런스도 작은 소개 문구 + 큰 제목을 함께 쓴다.
 
-    제목이 짧을수록 폰트를 더 키우고(_title_font_size), cover_align(하단좌측/
-    가운데)에 따라 표지 사진 구도에 맞는 배치를 쓴다 — 표지가 매번 똑같은
-    자리에 똑같은 크기로만 나오면 임팩트가 없다는 피드백 반영. 제목 안의
-    **강조** 구간은 세트 공통 box_style에 맞는 포인트색으로 찍는다(표지에서
-    딱 한 군데만 쓰는 의도된 강조 — 본문 곳곳까지 포인트색을 쓰던 예전 방식은
-    "왜 자꾸 주황색이냐"는 피드백을 받고 줄였다)."""
+    제목이 짧을수록 폰트를 더 키우고(_title_font_size), cover_align에 따라
+    표지 사진 구도에 맞는 배치(하단좌측/가운데/상단좌측) 중 하나를 쓴다 —
+    표지가 매번 똑같은 자리에 똑같은 크기로만 나오면 임팩트가 없다는 피드백
+    반영. 사진에 여백이 없을 때(annotate_cards가 판단 못 했을 때)는 기존
+    방식(하단좌측)으로 안전하게 폴백한다."""
     title_text = card.get("cover_title") or card["text"]
     kicker_text = card.get("cover_kicker")
     align = card.get("cover_align") or "bottom-left"
-    if align not in ("bottom-left", "center"):
-        align = "bottom-left"
-    box_style = card.get("box_style", "light")
-    accent_color = BOX_STYLES.get(box_style, BOX_STYLES["light"])["point_text"]
 
     size = _title_font_size(title_text)
     title_font = fonts["title_maker"](size)
-    box_align = "center" if align == "center" else "left"
-    edge_x = CANVAS_W // 2 if box_align == "center" else CONTENT_MARGIN_X
-    max_w = int(CONTENT_WIDTH * 0.85) if box_align == "center" else CONTENT_WIDTH
+    line_height = int(size * 1.25)
 
-    # 1) 더미 draw로 킥커+제목을 순서대로 "그려보고" 전체 블록 높이를 잰다 —
-    # bottom-left(맨 아래에서 위로 채움)/가운데 배치 둘 다 전체 블록이 정확히
-    # 어디서 시작해야 원하는 위치에 오는지 미리 알아야 한다.
-    y = 0
-    if kicker_text:
-        y = render_box_text(_MEASURE_DRAW, kicker_text, edge_x, y, fonts["label"], max_w, style=box_style, align=box_align)
-    y = render_box_text(
-        _MEASURE_DRAW, title_text, edge_x, y, title_font, max_w,
-        style=box_style, align=box_align, font_accent=title_font, accent_color=accent_color,
-    )
-    block_height = y
+    x_align = "center" if align == "center" else "left"
+    max_w = CONTENT_WIDTH if align != "center" else int(CONTENT_WIDTH * 0.85)
+    lines = wrap_tokens(title_text, title_font, max_w)
+    title_block_height = line_height * len(lines)
 
-    if align == "center":
-        start_y = SAFE_TOP + max(0, (SAFE_BOTTOM - SAFE_TOP - block_height) // 2)
+    kicker_line_height = int(LABEL_SIZE * 1.4)
+    kicker_gap = 10
+    kicker_lines = wrap_tokens(kicker_text, fonts["label"], max_w) if kicker_text else []
+    kicker_block_height = kicker_line_height * len(kicker_lines) + (kicker_gap if kicker_lines else 0)
+
+    total_height = kicker_block_height + title_block_height
+
+    # 순검정에 가까운 스크림이 사진 위에서 이질적인 검은 박스처럼 붕 떠
+    # 보인다는 피드백을 받고, 예전보다 옅게(최대 175 안팎) 낮췄다 — 텍스트
+    # 가독성은 유지하면서 사진 톤이 좀 더 비쳐 보이게.
+    if align == "top-left":
+        block_top = SAFE_TOP + CONTENT_TOP_PAD
+        band = (block_top - 40, block_top + total_height + 60, 165)
+    elif align == "center":
+        block_top = SAFE_TOP + (SAFE_BOTTOM - SAFE_TOP - total_height) // 2
+        band = (block_top - 50, block_top + total_height + 60, 180)
     else:  # bottom-left
-        start_y = SAFE_BOTTOM - block_height
+        block_top = SAFE_BOTTOM - total_height
+        band = (block_top - 30, CANVAS_H, 175)
 
     bg = load_background(card.get("local_path"))
+    bg = add_scrim(bg, bands=[band])
     draw = ImageDraw.Draw(bg)
 
-    y = start_y
-    if kicker_text:
-        y = render_box_text(draw, kicker_text, edge_x, y, fonts["label"], max_w, style=box_style, align=box_align)
-    render_box_text(
-        draw, title_text, edge_x, y, title_font, max_w,
-        style=box_style, align=box_align, font_accent=title_font, accent_color=accent_color,
-    )
+    x = CANVAS_W // 2 if x_align == "center" else CONTENT_MARGIN_X
+    title_top = block_top
+    if kicker_lines:
+        draw_wrapped(draw, kicker_lines, x, block_top, kicker_line_height, align=x_align, font_normal=fonts["label"], fill_normal=COLOR_ACCENT)
+        title_top = block_top + kicker_block_height
 
-    return bg
+    draw_wrapped(draw, lines, x, title_top, line_height, align=x_align, font_normal=title_font)
+
+    return bg.convert("RGB")
 
 
 def render_body_card(card: dict, fonts: dict) -> Image.Image:
     """2~N번 카드(슬라이드 본문) 템플릿: (있으면) 요약 제목 박스 → (있으면)
-    포인트 칩 → 본문 문단 순으로 쌓는다. 본문은 항상 하단 고정이고, 위쪽
-    요소(요약 제목/포인트)가 유난히 길어서 겹칠 것 같으면 본문을 그 아래로
-    내려서 배치한다.
+    포인트 칩 → 본문 문단 순으로 왼쪽 정렬로 쌓는다. 본문은 항상 하단
+    고정이고, 위쪽 요소(요약 제목/포인트)가 유난히 길어서 겹칠 것 같으면
+    본문을 그 아래로 내려서 배치한다.
 
     요약 제목/포인트는 둘 다 선택 사항이다 — annotate_cards()가 카드 사진과
     문구를 같이 보고 "이 카드에 실제로 도움이 될 때만" 채우도록 판단하므로,
     모든 카드에 박스가 다 들어가지는 않는다(내용에 안 맞으면 아예 생략).
-
-    본문 문단만은 박스에 넣지 않고 사진 위에 바로 쓴다 — "본문 내용은 그냥
-    글씨만"이라는 피드백을 받아서, 헤딩/포인트 칩은 박스를 유지하되 본문은
-    박스를 뺐다. 박스가 없으니 사진이 어떻든 대비를 보장하려고 흰 글씨에
-    짙은 테두리(스트로크)를 둘렀다(draw_wrapped의 stroke_width) — 박스/
-    스크림 없이도 어떤 사진 위에서든 읽히는 흔한 기법이다. 그래서 본문은
-    항상 왼쪽 정렬(요약 제목/포인트처럼 좌우로 옮겨 다니지 않음)로 고정해서
-    "요약 제목/포인트는 사진에 맞게 자유롭게, 본문은 항상 같은 자리"라는
-    일관된 골격을 유지한다. 본문 안의 **강조**도 색을 바꾸지 않고 굵기로만
-    표시한다 — 포인트색을 문단 곳곳에 쓰던 게 과했다는 피드백 반영, 포인트색은
-    표지/포인트 칩처럼 정말 아껴 쓰는 곳에만 남긴다."""
+    "요약 제목"은 본문 문장을 그대로 잘라 위로 올리는 게 아니라(문장이 중간에
+    끊겨 보이는 문제가 있었음) Claude가 새로 뽑은 짧은 문구를 쓴다 —
+    annotate_cards()가 없으면(ANTHROPIC_API_KEY 미설정 등) heading/point 없이
+    본문만 렌더링된다."""
     heading = card.get("heading")
     point = card.get("point")
     body_text = card.get("annotated_text") or card["text"]
     box_style = card.get("box_style", "light")
     box_align = card.get("box_align", "left")
-    box_vpos = card.get("box_vpos", "top")
-    edge_x = CANVAS_W - CONTENT_MARGIN_X if box_align == "right" else CONTENT_MARGIN_X
+    edge_x = CONTENT_MARGIN_X if box_align == "left" else CANVAS_W - CONTENT_MARGIN_X
+    # 박스 색은 세트 전체에서 통일되지만(box_style), 그 자리(맨 위/중간)는
+    # 카드마다 사진의 여백 위치에 맞게 자유롭게 달라져도 된다는 피드백을
+    # 반영해 box_vpos로 시작 y를 다르게 잡는다 — "색은 하나로, 배치는
+    # 다양하게".
+    box_top_y = SAFE_TOP + CONTENT_TOP_PAD if card.get("box_vpos", "top") == "top" else SAFE_TOP + int((SAFE_BOTTOM - SAFE_TOP) * 0.32)
 
-    top_y = SAFE_TOP + CONTENT_TOP_PAD if box_vpos == "top" else SAFE_TOP + int((SAFE_BOTTOM - SAFE_TOP) * 0.32)
+    body_lines = wrap_tokens(body_text, fonts["body"], CONTENT_WIDTH)
+    body_line_height = int(BODY_SIZE * 1.5)
+    body_block_height = body_line_height * len(body_lines)
 
-    # 1) 더미 draw로 위쪽 블록(요약 제목 + 포인트 칩) 높이를 먼저 잰다.
-    y = top_y
+    # 1) 위쪽 블록(요약 제목 + 포인트 칩)이 실제로 몇 픽셀을 차지하는지 더미
+    # draw로 먼저 계산한다 — 이걸 알아야 본문이 겹치지 않는 위치를 알 수 있고,
+    # 스크림도 최종 본문 위치에 맞춰 미리 깔 수 있다.
+    y = box_top_y
     if heading:
         y = render_box_text(_MEASURE_DRAW, heading, edge_x, y, fonts["heading"], CONTENT_WIDTH, style=box_style, align=box_align)
     if point:
         y = render_box_text(_MEASURE_DRAW, point, edge_x, y, fonts["point"], CONTENT_WIDTH, prefix="→ ", style=box_style, align=box_align, is_point=True)
     top_block_bottom = y
 
-    # 2) 본문은 박스가 없어서 줄 수만 알면 바로 하단 고정 시작 y를 계산할 수
-    # 있다(render_box_text의 패딩 계산이 필요 없음).
-    body_lines = wrap_tokens(body_text, fonts["body"], CONTENT_WIDTH)
-    body_line_height = int(BODY_SIZE * 1.5)
-    body_top = SAFE_BOTTOM - body_line_height * len(body_lines)
+    body_top = SAFE_BOTTOM - body_block_height
     if body_top < top_block_bottom:
         body_top = top_block_bottom  # 부득이하게 겹치면 위쪽 블록 바로 아래로
 
     bg = load_background(card.get("local_path"))
+    bg = add_scrim(bg, bands=[(body_top - 44, CANVAS_H, 200)])
     draw = ImageDraw.Draw(bg)
 
-    y = top_y
+    y = box_top_y
     if heading:
         y = render_box_text(draw, heading, edge_x, y, fonts["heading"], CONTENT_WIDTH, style=box_style, align=box_align)
     if point:
         y = render_box_text(draw, point, edge_x, y, fonts["point"], CONTENT_WIDTH, prefix="→ ", style=box_style, align=box_align, is_point=True)
 
     draw_wrapped(
-        draw, body_lines, CONTENT_MARGIN_X, body_top, body_line_height, align="left",
-        font_normal=fonts["body"], font_accent=fonts["body_bold"],
-        fill_normal=COLOR_TEXT, fill_accent=COLOR_TEXT,
-        stroke_width=3, stroke_fill=COLOR_STROKE,
+        draw, body_lines, CONTENT_MARGIN_X, body_top, body_line_height,
+        align="left", font_normal=fonts["body"], font_accent=fonts["body_bold"],
     )
 
-    return bg
+    return bg.convert("RGB")
 
 
 def render_closing_card(card: dict, fonts: dict) -> Image.Image:
-    """마지막 카드(마무리) 템플릿: CTA + 댓글 유도 질문 + 계정 핸들을 각각
-    박스에 담아 왼쪽 정렬로 쌓는다(스크림 없음, 다른 템플릿과 같은 박스
-    방식). approved_script.json의 cta/comment_question은 어느 슬라이드에도
-    안 묶여 있어서, photo_agent.py가 따로 찾아둔 마무리 전용 사진 위에
-    이 카드를 만든다."""
-    box_style = card.get("box_style", "light")
-
+    """마지막 카드(마무리) 템플릿: CTA + 댓글 유도 질문 + 계정 핸들을 왼쪽
+    정렬로 배치한다. approved_script.json의 cta/comment_question은 어느
+    슬라이드에도 안 묶여 있어서, 마지막 슬라이드 이미지를 재사용해 이 카드를
+    새로 만든다."""
     bg = load_background(card.get("local_path"))
+    bg = add_full_scrim(bg, opacity=165)
     draw = ImageDraw.Draw(bg)
 
-    y = int(CANVAS_H * 0.38)
-    y = render_box_text(draw, card["cta"], CONTENT_MARGIN_X, y, fonts["title"], CONTENT_WIDTH, style=box_style, align="left")
-    y += 12
-    y = render_box_text(draw, card["comment_question"], CONTENT_MARGIN_X, y, fonts["body"], CONTENT_WIDTH, style=box_style, align="left")
-    y += 12
-    render_box_text(draw, ACCOUNT_HANDLE, CONTENT_MARGIN_X, y, fonts["label"], CONTENT_WIDTH, style=box_style, align="left")
+    cta_lines = wrap_tokens(card["cta"], fonts["title"], CONTENT_WIDTH)
+    cta_line_height = int(TITLE_SIZE * 1.25)
+    y = int(CANVAS_H * 0.40)
+    y = draw_wrapped(draw, cta_lines, CONTENT_MARGIN_X, y, cta_line_height, align="left", font_normal=fonts["title"], fill_normal=COLOR_ACCENT)
 
-    return bg
+    y += 30
+    q_lines = wrap_tokens(card["comment_question"], fonts["body"], CONTENT_WIDTH)
+    q_line_height = int(BODY_SIZE * 1.35)
+    draw_wrapped(draw, q_lines, CONTENT_MARGIN_X, y, q_line_height, align="left", font_normal=fonts["body"])
+
+    draw.text((CONTENT_MARGIN_X, SAFE_BOTTOM - LABEL_SIZE), ACCOUNT_HANDLE, font=fonts["label"], fill=COLOR_TEXT)
+
+    return bg.convert("RGB")
 
 
 # ---------------------------------------------------------------------------
@@ -926,7 +891,6 @@ def build_cards(script: dict, manifest: list, annotations: dict = None) -> list:
                 "local_path": card.get("local_path"),
                 "cta": script.get("cta", ""),
                 "comment_question": script.get("comment_question", ""),
-                "box_style": card.get("box_style", "light"),
             }
             img = render_closing_card(closing_card, fonts)
         else:
