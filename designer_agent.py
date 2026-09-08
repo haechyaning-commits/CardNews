@@ -599,7 +599,9 @@ def annotate_cards(client: anthropic.Anthropic, script: dict, manifest: list) ->
 같이 보고 판단하세요. PM 승인을 받은 본문 문장 자체(** 강조 마크 제외)는 절대
 바꾸지 마세요. 카드마다 해당 없는 필드는 빈 문자열("")로 두세요 — 모든 카드에
 모든 요소를 다 넣을 필요는 없습니다. 오히려 필요 없는데 억지로 채우면 안
-됩니다.
+됩니다. 카드 역할이 "표지"면 cover_* 필드만, "마무리"면 아무 필드도 채우지
+마세요(마무리 카드 문구는 여기서 다루지 않고 별도 CTA 템플릿으로 렌더링되니
+전부 빈 문자열로 둠). 그 외 카드가 "본문 카드"입니다.
 
 가장 중요한 원칙: 색/스타일은 세트 전체가 하나로 통일돼야 하고(카드마다 흰
 박스/검정 박스가 섞이면 산만하고 통일감이 없어 보입니다), 위치/구성은 오히려
@@ -864,32 +866,52 @@ def safe_filename(text: str, max_len: int = 12) -> str:
 
 
 def build_cards(script: dict, manifest: list, annotations: dict = None) -> list:
-    """crop_manifest.json의 각 카드(표지+슬라이드) + approved_script.json에서
-    뽑은 마무리 카드까지 합쳐서 렌더링 대상 목록을 만든다. annotations는
-    annotate_cards()가 만든 {index: {heading, annotated_text, point}} 맵."""
+    """crop_manifest.json의 각 카드(표지+슬라이드+마무리)를 렌더링 대상
+    목록으로 만든다. annotations는 annotate_cards()가 만든
+    {index: {heading, annotated_text, point, ...}} 맵.
+
+    마무리 카드는 이제 photo_agent.py가 전용 사진을 따로 찾아서
+    manifest 안에 role="마무리" 항목으로 들어있다 — 예전엔 마지막 슬라이드
+    사진을 그대로 재사용해서 캐러셀 마지막 두 장이 같은 사진으로 겹쳐 보이는
+    문제가 있었다. photo_agent.py를 다시 안 돌린 예전 crop_manifest.json
+    (마무리 항목이 없는 버전)을 쓸 때는 예전처럼 마지막 슬라이드 사진을
+    재사용하는 폴백으로 자동 전환한다 — API를 다시 안 불러도 파이프라인이
+    죽지 않게."""
     annotations = annotations or {}
     fonts = load_fonts()
 
     results = []
+    has_dedicated_closing = any(c.get("role") == "마무리" for c in manifest)
     for card in manifest:
         card = {**card, "topic": script.get("topic", ""), **annotations.get(card["index"], {})}
         if card["role"] == "표지":
             img = render_header_card(card, fonts)
+        elif card["role"] == "마무리":
+            closing_card = {
+                "local_path": card.get("local_path"),
+                "cta": script.get("cta", ""),
+                "comment_question": script.get("comment_question", ""),
+            }
+            img = render_closing_card(closing_card, fonts)
         else:
             img = render_body_card(card, fonts)
         results.append((card["index"], card["role"], img))
         print(f"  카드 {card['index']}({card['role']}) 렌더링 완료")
 
-    last_with_image = next((c for c in reversed(manifest) if c.get("local_path")), None)
-    closing_card = {
-        "local_path": last_with_image.get("local_path") if last_with_image else None,
-        "cta": script.get("cta", ""),
-        "comment_question": script.get("comment_question", ""),
-    }
-    closing_img = render_closing_card(closing_card, fonts)
-    closing_index = (manifest[-1]["index"] + 1) if manifest else 1
-    results.append((closing_index, "마무리", closing_img))
-    print(f"  카드 {closing_index}(마무리) 렌더링 완료")
+    if not has_dedicated_closing:
+        last_with_image = next((c for c in reversed(manifest) if c.get("local_path")), None)
+        closing_card = {
+            "local_path": last_with_image.get("local_path") if last_with_image else None,
+            "cta": script.get("cta", ""),
+            "comment_question": script.get("comment_question", ""),
+        }
+        closing_img = render_closing_card(closing_card, fonts)
+        closing_index = (manifest[-1]["index"] + 1) if manifest else 1
+        results.append((closing_index, "마무리", closing_img))
+        print(
+            f"  카드 {closing_index}(마무리) 렌더링 완료 "
+            "(전용 사진이 없어 마지막 슬라이드 사진을 재사용 — photo_agent.py를 다시 돌리면 전용 사진으로 바뀝니다)"
+        )
 
     return results
 
@@ -906,6 +928,8 @@ def build_demo_manifest(script: dict) -> list:
 
     cards = [{"index": 1, "role": "표지", "text": script["hook"]}]
     cards += [{"index": s["index"], "role": s["role"], "text": s["text"]} for s in script["slides"]]
+    closing_text = f"{script.get('cta', '')} {script.get('comment_question', '')}".strip()
+    cards.append({"index": cards[-1]["index"] + 1, "role": "마무리", "text": closing_text})
 
     manifest = []
     for i, card in enumerate(cards):

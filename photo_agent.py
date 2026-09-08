@@ -767,9 +767,14 @@ def collect_photos(script: dict) -> list:
         f"  목표 밝기: {tone['target_brightness']} / 검색어 힌트: \"{tone['search_hint']}\"\n"
     )
 
-    # 표지(hook) + 각 슬라이드를 "이미지가 필요한 카드" 목록으로 정리
+    # 표지(hook) + 각 슬라이드 + 마무리(CTA)를 "이미지가 필요한 카드" 목록으로
+    # 정리. 마무리 카드도 자기 사진을 따로 찾는다 — 예전엔 디자이너 단계에서
+    # 마지막 슬라이드 사진을 그대로 재사용했는데, 그러면 캐러셀 마지막 두
+    # 장(마지막 슬라이드 + 마무리)이 똑같은 사진으로 겹쳐 보이는 문제가 있었다.
     cards = [{"index": 1, "role": "표지", "text": script["hook"]}]
     cards += [{"index": s["index"], "role": s["role"], "text": s["text"]} for s in script["slides"]]
+    closing_text = f"{script.get('cta', '')} {script.get('comment_question', '')}".strip()
+    cards.append({"index": cards[-1]["index"] + 1, "role": "마무리", "text": closing_text})
 
     assignments = []
     used_ids = set()  # 중복 배정 방지용 — 이미 고른 사진의 unsplash id를 기록
