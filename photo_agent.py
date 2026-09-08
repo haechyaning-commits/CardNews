@@ -124,6 +124,18 @@ SHOT_TYPES = [
 # "외국인 느낌"이 세트 전체 인상을 좌우하지 않게 하는 쪽으로 같이 대응한다.
 PERSON_SHOT_TYPES = {"close_up_face", "half_body_portrait"}
 
+# hands_action/product_flatlay는 "인물이 안 나오는 구도"로 분류해뒀지만,
+# 실제로 돌려보니 "손으로 크림 바르는" 같은 검색어의 상당수 결과가 얼굴을
+# 같이 프레이밍하고 있어서(스톡 사진 특성상 아주 흔함) close_up_face/
+# half_body_portrait 사진과 시각적으로 거의 구분이 안 되는 문제가 있었다
+# ("사진이 다 비슷한 얼굴 클로즈업으로 보인다"는 피드백). 프롬프트로
+# "인물이 안 나오니 신경 안 써도 된다"고만 해둔 게 원인이라, 검색어 자체에
+# 얼굴을 배제하는 키워드를 코드로 강제로 덧붙인다.
+NO_FACE_QUERY_SUFFIX = {
+    "hands_action": "hands only cropped no face",
+    "product_flatlay": "no person no face",
+}
+
 # 카드마다 사진을 따로따로 고른 뒤 나중에 밝기를 맞추는 게 아니라, 애초에
 # "이번 세트는 이 톤으로 간다"를 먼저 정하고 그 톤에 맞는 사진만 검색·선택
 # 하기 위한 프리셋. search_hint는 검색어에 곁들일 영어 키워드, target_brightness는
@@ -505,8 +517,10 @@ def generate_query(
 - 인물이 나오는 구도라면 "professional beauty editorial" 또는 "beauty campaign photography"
   같은 표현도 함께 넣어서, 캐주얼한 일상 스냅샷보다 조명·스타일링·구도가 잡힌 화보st
   사진이 검색되게 하세요(예: "asian woman skincare professional beauty editorial").
-- 손/제품 구도(hands_action, product_flatlay)는 인물이 안 나오니 이런 키워드가
-  필요 없습니다.
+- 손/제품 구도(hands_action, product_flatlay)는 얼굴이 같이 나오지 않게, 검색어에
+  "hands only" 또는 "no face" 같은 표현을 넣어서 손/제품만 명확히 나오는 사진을
+  찾으세요 — 이 구도로 검색해도 얼굴이 같이 잡히는 사진이 많이 섞여 나와서 인물
+  구도와 시각적으로 구분이 안 되는 문제가 있었습니다.
 - 피부 트러블/여드름을 있는 그대로 클리닉/의학 사진처럼 적나라하게 보여주는 극단적
   클로즈업(모공, 뾰루지, 피부 질환이 그대로 보이는 매크로샷)은 보는 사람에게 부담스러운
   느낌을 주니 피하세요.
@@ -573,14 +587,20 @@ def _fetch_image_block(url: str):
 
 
 def pick_best(
-    client: anthropic.Anthropic, card_text: str, role: str, candidates: list, tone: dict, allow_reject: bool = True
+    client: anthropic.Anthropic, card_text: str, role: str, candidates: list, tone: dict, shot_type: str = None, allow_reject: bool = True
 ) -> dict:
     """후보 이미지를 실제로(썸네일을 다운로드해서) 보고 카드에 가장 맞는 걸
     고른다. alt_description 텍스트만 보고 고르면 "종이 질감"을 "스킨케어와
     은유적으로 어울린다"고 억지로 갖다 붙이는 문제가 있었어서, 진짜 이미지를
     같이 넣어서 판단하게 한다. allow_reject=False면(검색어를 넓힌 재시도
     라운드) 카드가 통째로 빌 수 있는 상황이니 무조건 그나마 나은 걸 고르게
-    한다."""
+    한다.
+
+    shot_type이 hands_action/product_flatlay처럼 인물이 없어야 하는 구도면,
+    검색어에 이미 "no face" 류 키워드를 넣었어도 얼굴이 같이 나온 후보가
+    섞여 들어올 수 있다(검색어만으로 완벽히 걸러지지 않음) — 후보를 실제로
+    보고 있으니, 여기서 한 번 더 "얼굴이 나온 후보는 피하라"고 명시해서
+    이중으로 막는다."""
     if not candidates:
         return None
 
@@ -626,6 +646,15 @@ def pick_best(
         "기준으로 판단하라는 뜻입니다."
     )
 
+    no_face_note = ""
+    if shot_type in NO_FACE_QUERY_SUFFIX:
+        no_face_note = (
+            "\n\n이 카드는 손/제품 구도(얼굴이 없어야 함)입니다. 검색어에 얼굴 배제 키워드를 넣었지만 "
+            "그래도 얼굴이 같이 나온 후보가 섞여 있을 수 있습니다 — 얼굴이 뚜렷하게 보이는 후보는 "
+            "피하고, 손/제품만 나온 후보를 우선하세요. 세트 안의 다른 카드들이 이미 얼굴 클로즈업"
+            "위주라 이 카드까지 얼굴이 나오면 세트 전체가 비슷비슷하게 반복돼 보입니다."
+        )
+
     if allow_reject:
         reject_note = (
             "\n\n중요: 후보 이미지를 실제로 봤을 때 카드 문구와 명백히 무관하거나(종이/패브릭/추상적인 "
@@ -642,7 +671,7 @@ def pick_best(
     system_prompt = f"""당신은 스킨케어 카드뉴스 사진수집가입니다. 카드 문구와 실제 후보 이미지들을
 직접 보고, 가장 자연스럽고 내용에 어울리는 사진을 고르세요. 과도하게 연출되거나 전후비교처럼
 보이는 사진은 피하세요. 이번 세트는 "{tone_label}" 톤으로 통일하고 있습니다 — 내용 적합성이
-비슷한 후보가 여럿이면 "톤 잘 맞음"으로 표시된 쪽을 우선하세요.{cover_note}{polish_note}{reject_note}
+비슷한 후보가 여럿이면 "톤 잘 맞음"으로 표시된 쪽을 우선하세요.{cover_note}{polish_note}{no_face_note}{reject_note}
 
 submit_pick 도구로만 응답하세요."""
 
@@ -755,13 +784,24 @@ def collect_photos(script: dict) -> list:
             allowed_shot_types = [t for t in SHOT_TYPES if t not in PERSON_SHOT_TYPES]
         else:
             allowed_shot_types = SHOT_TYPES
+        # 직전 카드와 완전히 같은 구도가 또 나오는 것도 막는다 — person 구도
+        # 끼리(예: close_up_face 두 번 연속)뿐 아니라 hands_action 두 번
+        # 연속처럼 person 카운터엔 안 잡히는 반복도 시각적으로 붕어빵처럼
+        # 보이는 원인이었다. 선택지가 하나만 남으면(강제 상황) 그대로 둔다.
+        if recent_shot_types and len(allowed_shot_types) > 1:
+            allowed_shot_types = [t for t in allowed_shot_types if t != recent_shot_types[-1]] or allowed_shot_types
         query, shot_type = generate_query(
             client, card["text"], card["role"], recent_shot_types[-2:], tone, allowed_shot_types
         )
+        # hands_action/product_flatlay는 검색어 자체에 얼굴 배제 키워드를
+        # 코드로 강제해서, Claude가 깜빡하고 안 넣어도 항상 적용되게 한다.
+        no_face_suffix = NO_FACE_QUERY_SUFFIX.get(shot_type)
+        if no_face_suffix and no_face_suffix not in query:
+            query = f"{query} {no_face_suffix}"
         candidates = gather_candidates(
             query, unsplash_key, pexels_key, used_ids, target_brightness=tone["target_brightness"], banned=banned
         )
-        picked = pick_best(client, card["text"], card["role"], candidates, tone) if candidates else None
+        picked = pick_best(client, card["text"], card["role"], candidates, tone, shot_type=shot_type) if candidates else None
 
         # 여기로 오는 경우는 둘 중 하나다: (1) "asian"/"korean"+톤 키워드까지 붙인
         # 검색어가 너무 구체적이라 결과가 아예 없거나, (2) 결과는 있는데 다
@@ -781,7 +821,7 @@ def collect_photos(script: dict) -> list:
                 banned=banned,
             )
             fallback_picked = (
-                pick_best(client, card["text"], card["role"], fallback_candidates, tone, allow_reject=False)
+                pick_best(client, card["text"], card["role"], fallback_candidates, tone, shot_type=shot_type, allow_reject=False)
                 if fallback_candidates
                 else None
             )
