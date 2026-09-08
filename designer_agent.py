@@ -13,6 +13,12 @@ crop_images.py가 만들어둔 로컬 이미지(crop_manifest.json + images/, �
   밝든 어둡든 가독성이 항상 확보되게 한다.
 - 상하 15%는 프로필 아이콘/캡션 UI에 가려질 수 있는 세이프존이라 핵심 텍스트는
   그 안쪽에 배치한다.
+- 본문 슬라이드 텍스트는 항상 하단에 고정하지 않고 위/가운데/아래를 돌아가며
+  배치한다(pick_position). 문구가 짧으면 위쪽은 역할 태그와 붙어 답답해
+  보여서 빼고, 문구가 길면(4줄 이상) 하단에 몰아넣으면 한 덩어리가 화면
+  맨 밑에 눌려 붙어 보여서 빼는 식으로, 줄 수에 안 어울리는 위치는 후보에서
+  제외한 다음 직전 카드와 겹치지 않게 돌려쓴다. 스크림도 고정된 하단 비율이
+  아니라 실제 텍스트 블록 위치를 따라가며 그 주변만 어둡게 깐다.
 
 approved_script.json에는 슬라이드(표지+2~8번)와 별개로 cta/comment_question이
 최상위 필드로 따로 있다(어느 슬라이드에도 안 묶여 있음) — 이건 "마무리" 카드가
@@ -63,6 +69,10 @@ SAFE_TOP = int(CANVAS_H * 0.15)
 SAFE_BOTTOM = CANVAS_H - int(CANVAS_H * 0.15)
 CONTENT_MARGIN_X = 72  # 좌우 여백
 CONTENT_WIDTH = CANVAS_W - CONTENT_MARGIN_X * 2
+
+# 역할 태그(작은 라벨) 한 줄이 차지하는 높이 + 본문과의 간격. 본문 텍스트를
+# "위쪽" 배치로 그릴 때 태그와 겹치지 않게 이만큼은 비워둔다.
+TAG_RESERVE = 100
 
 # 색상 팔레트: 텍스트(흰색) / 포인트(웜 톤 포인트색) / 스크림(검정, 아래 텍스트
 # 뒤에 까는 반투명 박스 역할) 3가지로 고정한다. 포인트색은 crop_images.py의
@@ -276,28 +286,47 @@ def load_background(local_path) -> Image.Image:
     return Image.new("RGBA", (CANVAS_W, CANVAS_H), (*COLOR_SCRIM, 255))
 
 
-def add_scrim(img: Image.Image, dark_from_y: int, max_opacity: int, fade_height: int = 160, min_opacity: int = 40) -> Image.Image:
-    """dark_from_y 지점부터는 max_opacity로 완전히 어둡고, 그 위 fade_height
-    구간은 min_opacity에서 max_opacity로 서서히 어두워지고, 그보다 더 위는
-    min_opacity로 은은하게 깔린다(맨 위 역할 태그도 밝은 사진 위에서 살짝은
-    또렷해지게).
+def add_scrim(
+    img: Image.Image,
+    band_top: int,
+    band_bottom: int,
+    max_opacity: int,
+    fade: int = 160,
+    min_opacity: int = 40,
+) -> Image.Image:
+    """[band_top, band_bottom] 구간은 max_opacity로 완전히 어둡고, 그 위아래로
+    fade만큼은 min_opacity까지 서서히 옅어지고, 그보다 더 벗어난 곳은
+    min_opacity로 은은하게 깔린다(역할 태그 같은 텍스트도 밝은 사진 위에서
+    살짝은 또렷해지게).
 
-    dark_from_y를 텍스트 블록이 시작되는 y좌표로 넘기면, 문구가 몇 줄이든
-    상관없이 텍스트 전체가 항상 max_opacity 스크림 위에 놓인다 — 예전엔 이미지
-    하단 비율(예: 50%)로 고정해서 깔았는데, 슬라이드마다 문구 길이가 달라
-    문구가 긴 카드는 첫 줄이 스크림이 옅은 지점에 걸려 밝은 사진에서 가독성이
-    떨어지는 문제가 있었다."""
+    텍스트 블록이 표지/본문 카드처럼 하단에 있든, "위쪽"/"가운데" 배치로
+    바뀌든 band_top/band_bottom을 그 블록 위치에 맞춰 넘기면 항상 텍스트
+    바로 뒤만 어두워진다 — 예전엔 이미지 하단 고정 비율로만 스크림을 깔아서
+    텍스트를 하단이 아닌 다른 위치에 놓을 수가 없었다. band_bottom을
+    이미지 높이로 주면(표지처럼 텍스트가 맨 아래까지 이어질 때) 아래쪽은
+    옅어지지 않고 가장자리까지 쭉 어둡게 유지된다."""
     w, h = img.size
-    fade_start = max(0, dark_from_y - fade_height)
+    band_top = max(0, band_top)
+    band_bottom = min(h, band_bottom)
+    fade_in_start = max(0, band_top - fade)
+    fade_out_end = min(h, band_bottom + fade)
+
     gradient = Image.new("L", (1, h), 0)
     for y in range(h):
-        if y >= dark_from_y:
+        if band_top <= y <= band_bottom:
             v = max_opacity
-        elif y <= fade_start:
-            v = min_opacity
-        else:
-            t = (y - fade_start) / max(1, dark_from_y - fade_start)
-            v = int(min_opacity + (max_opacity - min_opacity) * t)
+        elif y < band_top:
+            if y <= fade_in_start:
+                v = min_opacity
+            else:
+                t = (y - fade_in_start) / max(1, band_top - fade_in_start)
+                v = int(min_opacity + (max_opacity - min_opacity) * t)
+        else:  # y > band_bottom
+            if y >= fade_out_end:
+                v = min_opacity
+            else:
+                t = (fade_out_end - y) / max(1, fade_out_end - band_bottom)
+                v = int(min_opacity + (max_opacity - min_opacity) * t)
         gradient.putpixel((0, y), v)
     gradient = gradient.resize((w, h))
     scrim = Image.new("RGBA", (w, h), (*COLOR_SCRIM, 255))
@@ -350,7 +379,7 @@ def render_header_card(card: dict, fonts: dict, total: int) -> Image.Image:
     top_y = SAFE_BOTTOM - line_height * len(lines)
 
     bg = load_background(card.get("local_path"))
-    bg = add_scrim(bg, dark_from_y=top_y, max_opacity=205)
+    bg = add_scrim(bg, band_top=top_y, band_bottom=CANVAS_H, max_opacity=205)
     draw = ImageDraw.Draw(bg)
 
     draw_role_tag(draw, "표지", f"1/{total}", fonts)
@@ -371,19 +400,63 @@ def render_header_card(card: dict, fonts: dict, total: int) -> Image.Image:
     return bg.convert("RGB")
 
 
-def render_body_card(card: dict, fonts: dict, total: int) -> Image.Image:
+# 본문 카드 텍스트를 하단에만 몰아넣지 않고 위/가운데/아래를 돌아가며 쓰기
+# 위한 후보들. 문구가 짧을수록(1줄) 굳이 "위"에 놓으면 역할 태그 바로 밑에
+# 붙어 답답해 보여서 후보에서 뺀다. 문구가 길수록(4줄 이상) "아래"에 몰아
+# 넣으면 한 덩어리가 화면 맨 밑에 눌려 붙어 보이길래("두번째 카드 글씨가
+# 너무 많다"는 피드백) 후보에서 빼고 가운데/위로 화면 전체를 넓게 쓰게 한다.
+_POSITION_CYCLE = ["bottom", "center", "top"]
+
+
+def pick_position(prev_position: str, n_lines: int, counter: int) -> str:
+    """직전 카드와 같은 위치가 연속으로 나오지 않게 하면서, 문구 길이에 안
+    어울리는 위치(아주 짧은 글은 "위", 아주 긴 글은 "아래")는 후보에서 뺀
+    다음 순서대로 하나씩 돌려쓴다."""
+    if n_lines >= 4:
+        options = ["center", "top"]
+    elif n_lines <= 1:
+        options = ["bottom", "center"]
+    else:
+        options = list(_POSITION_CYCLE)
+
+    if prev_position in options and len(options) > 1:
+        options = [o for o in options if o != prev_position]
+    return options[counter % len(options)]
+
+
+def render_body_card(card: dict, fonts: dict, total: int, position: str) -> Image.Image:
     """2~N번 카드(슬라이드 본문) 템플릿: 역할 태그(배경설명/핵심정보/반전인사이트
-    등) + 슬라이드 문구를 하단 세이프존에 배치한다."""
+    등) + 슬라이드 문구를 배치한다. position("top"/"center"/"bottom")에 따라
+    세이프존 안에서 텍스트 블록을 위/가운데/아래 중 한 곳에 놓아서, 슬라이드
+    여러 장이 전부 하단에만 몰려 있지 않고 화면 전체를 골고루 쓰게 한다."""
     lines = wrap_tokens(card["text"], fonts["body_bold"], CONTENT_WIDTH)
     line_height = int(BODY_SIZE * 1.4)
-    top_y = SAFE_BOTTOM - line_height * len(lines)
+    block_height = line_height * len(lines)
+
+    top_limit = SAFE_TOP + TAG_RESERVE
+    bottom_limit = SAFE_BOTTOM
+    if block_height > bottom_limit - top_limit:
+        # 문구가 세이프존보다 길면 위치 선택과 상관없이 위쪽부터 채워서
+        # 세이프존 밖으로 잘리지 않게 한다.
+        position = "top"
+
+    if position == "top":
+        block_top = top_limit
+    elif position == "bottom":
+        block_top = bottom_limit - block_height
+    else:
+        block_top = top_limit + (bottom_limit - top_limit - block_height) / 2
+
+    band_padding = 44
+    band_top = block_top - band_padding
+    band_bottom = CANVAS_H if position == "bottom" else block_top + block_height + band_padding
 
     bg = load_background(card.get("local_path"))
-    bg = add_scrim(bg, dark_from_y=top_y, max_opacity=200)
+    bg = add_scrim(bg, band_top=band_top, band_bottom=band_bottom, max_opacity=200)
     draw = ImageDraw.Draw(bg)
 
     draw_role_tag(draw, card["role"], f"{card['page']}/{total}", fonts)
-    draw_wrapped(draw, lines, fonts["body_bold"], CANVAS_W // 2, top_y, line_height)
+    draw_wrapped(draw, lines, fonts["body_bold"], CANVAS_W // 2, block_top, line_height)
 
     return bg.convert("RGB")
 
@@ -435,12 +508,19 @@ def build_cards(script: dict, manifest: list) -> list:
     total = len(manifest) + 1  # 슬라이드 전부 + 마무리 카드 1장
 
     results = []
+    prev_position = None
+    body_counter = 0
     for i, card in enumerate(manifest, start=1):
         card = {**card, "page": i, "topic": script.get("topic", "")}
         if card["role"] == "표지":
             img = render_header_card(card, fonts, total)
         else:
-            img = render_body_card(card, fonts, total)
+            n_lines = len(wrap_tokens(card["text"], fonts["body_bold"], CONTENT_WIDTH))
+            position = pick_position(prev_position, n_lines, body_counter)
+            prev_position = position
+            body_counter += 1
+            img = render_body_card(card, fonts, total, position)
+            print(f"  카드 {card['index']}({card['role']}) 배치: {position} ({n_lines}줄)")
         results.append((card["index"], card["role"], img))
         print(f"  카드 {card['index']}({card['role']}) 렌더링 완료")
 
