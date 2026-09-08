@@ -20,6 +20,7 @@ preview.html
 # 마찬가지로 images/의 로컬 경로를 참조하는 파일이라 같이 뺀다.
 final/
 final_manifest.json
+final_preview.html
 
 # 폰트 파일은 라이선스 파일(OFL.txt 등)까지 같이 챙겨야 하고 용량도 커서
 # 커밋하지 않는다 — fonts/ 폴더를 만들어 Noto Sans KR을 직접 받아 넣으면 됨

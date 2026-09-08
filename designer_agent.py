@@ -49,19 +49,28 @@ approved_script.json에는 슬라이드(표지+2~8번)와 별개로 cta/comment_
 ------
 1. pip install Pillow anthropic requests
 2. crop_manifest.json + images/ 가 폴더에 있어야 한다 (먼저 crop_images.py 실행).
+   Unsplash/Pexels API 키 없이 레이아웃만 빠르게 보고 싶으면 이 단계를
+   건너뛰고 3번 대신 `python designer_agent.py --demo`로 실행해도 된다 —
+   approved_script.json의 예시 문구는 그대로 쓰고 사진 자리만 단색으로
+   채운다.
 3. export ANTHROPIC_API_KEY="..." — 카드별 요약 제목/강조/포인트를 만드는 데 씀.
    없어도 실행은 되지만 그 세 가지 없이 기본 스타일로만 렌더링된다.
 4. (필요하면) export ACCOUNT_HANDLE="@계정핸들" — 마무리 카드 하단에 표시된다.
    안 정하면 "@계정핸들"이 자리표시자로 들어가니 실제 발행 전에 바꿔야 한다.
-5. python designer_agent.py
+5. python designer_agent.py   (또는 python designer_agent.py --demo)
+6. python preview_final.py 를 실행하면 final/ 안의 카드 9장을 한 페이지로
+   모아 보여주는 final_preview.html이 생긴다 — 'open final_preview.html'로
+   브라우저에서 확인.
 
 결과: final/ 폴더에 card_01_표지.png ~ card_09_마무리.png 로 저장되고,
 각 카드의 최종 경로/역할이 담긴 final_manifest.json도 같이 생성된다.
 """
 
+import colorsys
 import json
 import os
 import re
+import sys
 from pathlib import Path
 
 import anthropic
@@ -682,16 +691,50 @@ def build_cards(script: dict, manifest: list, annotations: dict = None) -> list:
     return results
 
 
+def build_demo_manifest(script: dict) -> list:
+    """실제 사진(Unsplash/Pexels API 키 필요) 없이도 결과물을 눈으로 바로
+    확인해볼 수 있게, approved_script.json에 있는 예시 대본 문구는 그대로
+    쓰고 사진 자리에만 카드마다 다른 색의 단색 이미지를 채운 가짜
+    crop_manifest.json을 만든다. `python designer_agent.py --demo`로 쓴다.
+    images/, crop_manifest.json은 이미 .gitignore에 있어서 저장소를
+    더럽히지 않는다."""
+    images_dir = PROJECT_DIR / "images"
+    images_dir.mkdir(exist_ok=True)
+
+    cards = [{"index": 1, "role": "표지", "text": script["hook"]}]
+    cards += [{"index": s["index"], "role": s["role"], "text": s["text"]} for s in script["slides"]]
+
+    manifest = []
+    for i, card in enumerate(cards):
+        hue = (i * 0.13) % 1.0
+        r, g, b = (int(x * 255) for x in colorsys.hsv_to_rgb(hue, 0.35, 0.75))
+        img = Image.new("RGB", (CANVAS_W, CANVAS_H), (r, g, b))
+        filename = f"card_{card['index']:02d}_{safe_filename(card['role'])}.jpg"
+        img.save(images_dir / filename, "JPEG", quality=90)
+        manifest.append({**card, "local_path": f"images/{filename}"})
+
+    return manifest
+
+
 def main():
+    demo = "--demo" in sys.argv
     manifest_path = PROJECT_DIR / "crop_manifest.json"
     script_path = PROJECT_DIR / "approved_script.json"
-    if not manifest_path.exists():
-        raise SystemExit(f"{manifest_path} 이 없습니다. 먼저 crop_images.py를 실행하세요.")
     if not script_path.exists():
         raise SystemExit(f"{script_path} 이 없습니다. 먼저 orchestrator.py를 실행하세요.")
-
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     script = json.loads(script_path.read_text(encoding="utf-8"))
+
+    if manifest_path.exists():
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    elif demo:
+        print("(--demo: 실제 사진 없이 단색 이미지로 대체해서 레이아웃만 미리 봅니다)\n")
+        manifest = build_demo_manifest(script)
+    else:
+        raise SystemExit(
+            f"{manifest_path} 이 없습니다. 먼저 crop_images.py를 실행하세요.\n"
+            "실제 사진 없이 레이아웃만 빠르게 보고 싶으면 "
+            "'python designer_agent.py --demo'로 실행하세요."
+        )
 
     if ACCOUNT_HANDLE == "@계정핸들":
         print(
