@@ -525,26 +525,23 @@ submit_annotations 도구로만 응답하세요."""
 # 3종 템플릿
 # ---------------------------------------------------------------------------
 
-def draw_role_tag(draw, label: str, page_note: str, fonts: dict):
-    """세이프존 위쪽에 역할 태그(작은 포인트색 글씨)와 페이지 인디케이터를
-    한 줄에 배치한다. 모든 본문/표지 카드가 공유하는 공통 요소."""
+def draw_role_tag(draw, label: str, fonts: dict):
+    """세이프존 위쪽에 역할 태그(작은 포인트색 글씨) 박스 라벨을 배치한다.
+    모든 본문/표지 카드가 공유하는 공통 요소. 페이지 번호("N/9")는 표지·
+    본문·마무리 어디에도 안 넣기로 함(사용자 요청) — 캐러셀 자체가 이미
+    번호를 보여주니 중복이라 뺐다."""
     y = SAFE_TOP
     pad_x, pad_y = 16, 10
-
-    def pill(x0, x1):
-        draw.rounded_rectangle([x0 - pad_x, y - pad_y, x1 + pad_x, y + LABEL_SIZE + pad_y], radius=8, fill=(*COLOR_SCRIM, 140))
-
     label_w = draw.textlength(label, font=fonts["label"])
-    pill(CONTENT_MARGIN_X, CONTENT_MARGIN_X + label_w)
+    draw.rounded_rectangle(
+        [CONTENT_MARGIN_X - pad_x, y - pad_y, CONTENT_MARGIN_X + label_w + pad_x, y + LABEL_SIZE + pad_y],
+        radius=8,
+        fill=(*COLOR_SCRIM, 140),
+    )
     draw.text((CONTENT_MARGIN_X, y), label, font=fonts["label"], fill=COLOR_ACCENT)
 
-    note_w = draw.textlength(page_note, font=fonts["label_regular"])
-    note_x = CANVAS_W - CONTENT_MARGIN_X - note_w
-    pill(note_x, note_x + note_w)
-    draw.text((note_x, y), page_note, font=fonts["label_regular"], fill=COLOR_TEXT)
 
-
-def render_header_card(card: dict, fonts: dict, total: int) -> Image.Image:
+def render_header_card(card: dict, fonts: dict) -> Image.Image:
     """1번 카드(표지) 템플릿: 주제 키워드를 작은 라벨로 hook 문구 바로 위에
     붙이고, 큰 제목을 하단 세이프존에 왼쪽 정렬로 배치한다(참고 레퍼런스의
     표지 구성 — 가운데 정렬 대신 하단좌측에 킥커+제목을 한 덩어리로)."""
@@ -556,7 +553,7 @@ def render_header_card(card: dict, fonts: dict, total: int) -> Image.Image:
     bg = add_scrim(bg, bands=[(title_top, CANVAS_H, 205)])
     draw = ImageDraw.Draw(bg)
 
-    draw_role_tag(draw, "표지", f"1/{total}", fonts)
+    draw_role_tag(draw, "표지", fonts)
 
     topic = card.get("topic", "")
     if topic:
@@ -567,7 +564,7 @@ def render_header_card(card: dict, fonts: dict, total: int) -> Image.Image:
     return bg.convert("RGB")
 
 
-def render_body_card(card: dict, fonts: dict, total: int) -> Image.Image:
+def render_body_card(card: dict, fonts: dict) -> Image.Image:
     """2~N번 카드(슬라이드 본문) 템플릿: 역할 태그 → (있으면) 요약 제목 박스 →
     (있으면) 포인트 칩 → 본문 문단 순으로 왼쪽 정렬로 쌓는다. 본문은 항상
     하단 고정이고, 위쪽 요소(요약 제목/포인트)가 유난히 길어서 겹칠 것 같으면
@@ -603,7 +600,7 @@ def render_body_card(card: dict, fonts: dict, total: int) -> Image.Image:
     bg = add_scrim(bg, bands=[(body_top - 44, CANVAS_H, 200)])
     draw = ImageDraw.Draw(bg)
 
-    draw_role_tag(draw, card["role"], f"{card['page']}/{total}", fonts)
+    draw_role_tag(draw, card["role"], fonts)
 
     y = SAFE_TOP + TAG_RESERVE
     if heading:
@@ -619,7 +616,7 @@ def render_body_card(card: dict, fonts: dict, total: int) -> Image.Image:
     return bg.convert("RGB")
 
 
-def render_closing_card(card: dict, fonts: dict, total: int) -> Image.Image:
+def render_closing_card(card: dict, fonts: dict) -> Image.Image:
     """마지막 카드(마무리) 템플릿: CTA + 댓글 유도 질문 + 계정 핸들을 왼쪽
     정렬로 배치한다. approved_script.json의 cta/comment_question은 어느
     슬라이드에도 안 묶여 있어서, 마지막 슬라이드 이미지를 재사용해 이 카드를
@@ -628,7 +625,7 @@ def render_closing_card(card: dict, fonts: dict, total: int) -> Image.Image:
     bg = add_full_scrim(bg, opacity=165)
     draw = ImageDraw.Draw(bg)
 
-    draw_role_tag(draw, "마무리", f"{total}/{total}", fonts)
+    draw_role_tag(draw, "마무리", fonts)
 
     cta_lines = wrap_tokens(card["cta"], fonts["title"], CONTENT_WIDTH)
     cta_line_height = int(TITLE_SIZE * 1.25)
@@ -660,15 +657,14 @@ def build_cards(script: dict, manifest: list, annotations: dict = None) -> list:
     annotate_cards()가 만든 {index: {heading, annotated_text, point}} 맵."""
     annotations = annotations or {}
     fonts = load_fonts()
-    total = len(manifest) + 1  # 슬라이드 전부 + 마무리 카드 1장
 
     results = []
-    for i, card in enumerate(manifest, start=1):
-        card = {**card, "page": i, "topic": script.get("topic", ""), **annotations.get(card["index"], {})}
+    for card in manifest:
+        card = {**card, "topic": script.get("topic", ""), **annotations.get(card["index"], {})}
         if card["role"] == "표지":
-            img = render_header_card(card, fonts, total)
+            img = render_header_card(card, fonts)
         else:
-            img = render_body_card(card, fonts, total)
+            img = render_body_card(card, fonts)
         results.append((card["index"], card["role"], img))
         print(f"  카드 {card['index']}({card['role']}) 렌더링 완료")
 
@@ -678,7 +674,7 @@ def build_cards(script: dict, manifest: list, annotations: dict = None) -> list:
         "cta": script.get("cta", ""),
         "comment_question": script.get("comment_question", ""),
     }
-    closing_img = render_closing_card(closing_card, fonts, total)
+    closing_img = render_closing_card(closing_card, fonts)
     closing_index = (manifest[-1]["index"] + 1) if manifest else 1
     results.append((closing_index, "마무리", closing_img))
     print(f"  카드 {closing_index}(마무리) 렌더링 완료")
