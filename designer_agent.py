@@ -14,22 +14,32 @@ crop_images.py가 만들어둔 로컬 이미지(crop_manifest.json + images/, �
 - 상하 15%는 프로필 아이콘/캡션 UI에 가려질 수 있는 세이프존이라 핵심 텍스트는
   그 안쪽에 배치한다.
 
-레이아웃(v3): "문장이 중간에 끊겨 보인다", "카드마다 위치가 달라 산만하다"는
-피드백을 반영해서 모든 본문 카드가 항상 같은 골격을 쓰되, 그 골격 안의 요소
-구성은 카드 내용에 따라 달라지게 했다.
-- 역할 태그(기존) 바로 아래에 그 카드 내용을 한눈에 보여주는 짧은 "요약 제목"을
-  박스 라벨로 얹는다 — 본문 문장을 잘라 쓰는 게 아니라 Claude가 새로 짧게 뽑는다.
-- 카드에 따라(정보성 카드 등) 뚜렷한 한 줄 "포인트"가 있으면 화살표 칩으로
-  따로 배치한다. 모든 카드에 다 넣지는 않는다 — 내용에 안 맞으면 생략.
-- 본문 문장은 원문 그대로(단어 하나도 안 바꿈) 두되, 그 중 가장 중요한 구간만
-  볼드체로 강조한다.
+레이아웃(v4): 아래 피드백을 반영해서 여러 차례 고쳤다.
+- "문장이 중간에 끊겨 보인다", "카드마다 위치가 달라 산만하다" → 모든 본문
+  카드가 항상 같은 골격(하단 고정 본문 + 필요하면 그 위에 요약 제목/포인트)을
+  쓰되, 골격 안의 요소 구성은 카드 내용에 따라 달라지게 함.
+- "표지/배경설명/핵심정보 같은 라벨은 본문 내용이 아니니 없애라" → 역할 태그
+  자체를 삭제. 카드엔 이제 실제 콘텐츠만 보인다.
+- "표지 제목이 hook 문장 그대로라 너무 길다, 딱 제목처럼 짧고 흥미롭게" →
+  Claude가 hook을 그대로 안 쓰고 짧고 강렬한 표지 제목(cover_title)을 새로
+  뽑아서 씀.
+- "박스는 검정 대신 흰색으로, 둥근 모서리 대신 각지게, 항상 넣을 필요는 없이
+  이미지랑 대본을 보고 디자인" → 요약 제목/포인트 박스를 흰 배경+검정 각진
+  테두리 스타일로 바꾸고(render_box_text), 카드 사진을 실제로 같이 보여주면서
+  Claude가 "이 카드에 필요한가"를 판단하게 해서(annotate_cards가 vision 입력을
+  받음) 필요 없으면 박스 자체를 안 그림.
+- "핵심 볼드체가 안 됐다" → 안전장치(강조 표시를 지운 본문이 원문과 다르면
+  강조를 포기하고 원문 그대로 쓰는 로직)가 공백 하나 차이에도 걸려서 강조가
+  자주 빠졌던 걸 확인 — 공백 차이는 무시하는 느슨한 비교로 완화하고, 폴백이
+  발생하면 콘솔에 로그를 남기게 함.
 - 전부 왼쪽 정렬로 통일해서(참고 레퍼런스 스타일) 카드마다 다른 배치가 아니라
-  "같은 시스템, 다른 내용"으로 일관성을 준다.
+  "같은 시스템, 다른 내용"으로 일관성을 줌.
 
-이 요약 제목/강조 구간/포인트는 문장을 새로 쓰는 게 아니라 "어디를 강조할지"를
-판단하는 작업이라 Claude 호출이 필요하다(annotate_cards). ANTHROPIC_API_KEY가
-없으면 이 단계를 건너뛰고 요약 제목/강조/포인트 없이 기본 스타일로만 렌더링한다
-— API 키가 없어도 파이프라인 자체는 죽지 않는다.
+이 표지 제목/요약 제목/강조 구간/포인트는 문장을 새로 쓰는 게 아니라 "어디를
+강조할지·뭐가 필요한지"를 판단하는 작업이라 Claude 호출이 필요하다
+(annotate_cards, 카드 사진도 같이 보냄). ANTHROPIC_API_KEY가 없으면 이 단계를
+건너뛰고 표지는 hook 원문을, 본문 카드는 요약 제목/강조/포인트 없이 기본
+스타일로만 렌더링한다 — API 키가 없어도 파이프라인 자체는 죽지 않는다.
 
 approved_script.json에는 슬라이드(표지+2~8번)와 별개로 cta/comment_question이
 최상위 필드로 따로 있다(어느 슬라이드에도 안 묶여 있음) — 이건 "마무리" 카드가
@@ -66,7 +76,9 @@ approved_script.json에는 슬라이드(표지+2~8번)와 별개로 cta/comment_
 각 카드의 최종 경로/역할이 담긴 final_manifest.json도 같이 생성된다.
 """
 
+import base64
 import colorsys
+import io
 import json
 import os
 import re
@@ -88,16 +100,22 @@ SAFE_BOTTOM = CANVAS_H - int(CANVAS_H * 0.15)
 CONTENT_MARGIN_X = 72  # 좌우 여백(왼쪽 정렬 기준선)
 CONTENT_WIDTH = CANVAS_W - CONTENT_MARGIN_X * 2
 
-# 역할 태그(작은 라벨) 한 줄이 차지하는 높이 + 요약 제목과의 간격.
-TAG_RESERVE = 100
+# 세이프존 맨 위에서 첫 요소(요약 제목 등)가 시작하기 전 여백. 예전엔 역할
+# 태그(표지/배경설명/핵심정보 같은 라벨)가 이 자리를 차지했는데, "본문 내용이
+# 아닌 라벨이 카드에 들어가는 게 이상하다"는 피드백을 받고 태그 자체를 없앴다.
+CONTENT_TOP_PAD = 16
 
-# 색상 팔레트: 텍스트(흰색) / 포인트(웜 톤 포인트색) / 스크림(검정, 텍스트
-# 뒤에 까는 반투명 박스 역할) 3가지로 고정한다. 포인트색은 crop_images.py의
-# 계정 고유 웜+뮤트 필터(붉은기를 살짝 올리는 방향)와 톤을 맞춰서 시리즈 전체가
-# 하나의 색 느낌으로 보이게 골랐다.
+# 색상 팔레트. 사진 위에 바로 얹는 텍스트(스크림 뒤)는 흰 텍스트 / 포인트색,
+# 박스 라벨(요약 제목/포인트 칩)은 흰 배경에 짙은 텍스트+테두리 — 참고
+# 레퍼런스처럼 "각진 흰 박스에 검정 텍스트/테두리" 스타일로 통일했다(예전엔
+# 반투명 검정 둥근 박스였는데 "흰색으로, 각지게" 피드백 반영).
 COLOR_TEXT = (255, 255, 255, 255)
 COLOR_ACCENT = (232, 176, 132, 255)
 COLOR_SCRIM = (20, 15, 12)
+COLOR_BOX_BG = (255, 255, 255, 235)
+COLOR_BOX_BORDER = (24, 20, 18, 255)
+COLOR_BOX_TEXT = (24, 20, 18, 255)
+COLOR_POINT_TEXT = (168, 88, 40, 255)  # 포인트 칩 전용 — 흰 배경 위에서도 잘 읽히는 짙은 웜톤
 
 TITLE_SIZE = 72    # 표지 hook / 마무리 CTA
 HEADING_SIZE = 54  # 본문 카드 상단 요약 제목
@@ -185,7 +203,6 @@ def load_fonts():
         "body_bold": make(bold_path, bold_idx, BODY_SIZE),
         "point": make(bold_path, bold_idx, POINT_SIZE),
         "label": make(bold_path, bold_idx, LABEL_SIZE),
-        "label_regular": make(reg_path, reg_idx, LABEL_SIZE),
     }
 
 
@@ -398,15 +415,15 @@ def render_box_text(
     font: ImageFont.FreeTypeFont,
     max_width: int,
     prefix: str = "",
-    outline=None,
-    text_color=COLOR_TEXT,
-    fill_opacity: int = 170,
+    text_color=COLOR_BOX_TEXT,
 ) -> int:
-    """텍스트를 줄바꿈해서 그 블록 크기에 딱 맞는 반투명 박스를 뒤에 깔고
-    왼쪽 정렬로 그린다. 역할 태그/요약 제목/포인트 칩이 전부 이 함수를 공유해서
+    """텍스트를 줄바꿈해서 그 블록 크기에 딱 맞는 흰 배경 + 각진 테두리 박스를
+    뒤에 깔고 왼쪽 정렬로 그린다. 요약 제목/포인트 칩이 이 함수를 공유해서
     "사진 밝기와 무관하게 항상 읽히는 박스 라벨"이라는 같은 시각 언어를 쓴다
-    (스크림 그라데이션과 달리, 사진의 밝은 부분 위에 떠 있어도 항상 보장됨).
-    다음 요소를 이어붙일 y좌표(여백 포함)를 반환한다."""
+    (참고 레퍼런스의 흰 박스+검정 테두리 스타일). 다음 요소를 이어붙일
+    y좌표(여백 포함)를 반환한다. 이 함수를 부르지 않으면(호출하는 쪽에서
+    heading/point가 없을 때 건너뛰면) 박스 자체가 카드에 안 들어간다 — 모든
+    카드에 박스를 강제로 넣지 않는다."""
     full_text = f"{prefix}{text}" if prefix else text
     lines = wrap_tokens(full_text, font, max_width)
     if not lines:
@@ -424,7 +441,7 @@ def render_box_text(
     last_line_bottom = top_y + (len(lines) - 1) * line_height + font.size
 
     box = [x - pad_x, top_y - pad_y, x + max_line_w + pad_x, last_line_bottom + pad_y]
-    draw.rounded_rectangle(box, radius=10, fill=(*COLOR_SCRIM, fill_opacity), outline=outline, width=2 if outline else 0)
+    draw.rectangle(box, fill=COLOR_BOX_BG, outline=COLOR_BOX_BORDER, width=2)
     draw_wrapped(draw, lines, x, top_y, line_height, align="left", font_normal=font, fill_normal=text_color)
 
     return int(box[3]) + 20
@@ -436,7 +453,7 @@ def render_box_text(
 
 ANNOTATE_TOOL = {
     "name": "submit_annotations",
-    "description": "카드뉴스 슬라이드마다 상단 요약 제목, 강조 표시가 추가된 본문, (있다면) 핵심 포인트 한 줄을 만든다.",
+    "description": "카드뉴스 카드마다(표지 포함) 실제 사진을 보고 디자인 요소(표지 제목 / 요약 제목 / 강조 / 포인트)를 판단해서 만든다.",
     "input_schema": {
         "type": "object",
         "properties": {
@@ -446,20 +463,24 @@ ANNOTATE_TOOL = {
                     "type": "object",
                     "properties": {
                         "index": {"type": "integer", "description": "카드 번호"},
+                        "cover_title": {
+                            "type": "string",
+                            "description": "표지 카드일 때만 채움. 짧고 강렬한 표지 제목(5~14자). 표지가 아니면 빈 문자열.",
+                        },
                         "heading": {
                             "type": "string",
-                            "description": "이 카드 내용을 한눈에 보여주는 아주 짧은 제목(4~14자). 본문 문장을 그대로 자르지 말고 새로 짧게 요약할 것.",
+                            "description": "본문 카드에서, 사진+문구를 보고 짧은 제목이 실제로 도움이 될 때만 채움(4~14자). 필요 없으면 빈 문자열.",
                         },
                         "body": {
                             "type": "string",
-                            "description": "원문 문장을 토씨 하나 바꾸지 말고 그대로 두되, 가장 중요한 구간 한두 곳만 **로 감싸서 강조 표시.",
+                            "description": "본문 카드에서, 원문 문장을 토씨 하나 바꾸지 말고 그대로 두되 가장 중요한 구간만 **로 감싸서 강조. 강조할 곳이 뚜렷하지 않으면 원문 그대로. 표지는 빈 문자열.",
                         },
                         "point": {
                             "type": "string",
-                            "description": "이 카드에 한 줄로 뽑아낼 만한 뚜렷한 핵심 포인트(6~16자)가 있으면 적고, 없으면 빈 문자열.",
+                            "description": "본문 카드에서 한 줄로 뽑아낼 만한 뚜렷한 핵심 포인트(6~16자)가 있으면 적고, 없으면 빈 문자열.",
                         },
                     },
-                    "required": ["index", "heading", "body", "point"],
+                    "required": ["index", "cover_title", "heading", "body", "point"],
                 },
             },
         },
@@ -468,60 +489,109 @@ ANNOTATE_TOOL = {
 }
 
 
+def _local_image_block(local_path):
+    """카드에 배정된 로컬 이미지를 Claude 메시지에 넣을 base64 이미지
+    블록으로 바꾼다. annotate_cards가 문구뿐 아니라 실제 사진 분위기도 보고
+    판단하게 하기 위함(예: 사진이 이미 여백이 없으면 요약 제목을 굳이 안
+    붙이는 식). 원본 그대로 보낼 필요는 없어서 작게 리사이즈해 토큰을 아낀다.
+    실패하면 None — 호출하는 쪽에서 문구만으로 판단하게 넘어간다."""
+    if not local_path:
+        return None
+    img_path = PROJECT_DIR / local_path
+    if not img_path.exists():
+        return None
+    try:
+        img = Image.open(img_path).convert("RGB")
+        img.thumbnail((360, 450))
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=80)
+        b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+        return {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": b64}}
+    except Exception:
+        return None
+
+
+def _normalize_for_compare(text: str) -> str:
+    """공백만 다른 건 같은 문장으로 보기 위한 느슨한 비교용 정규화."""
+    return " ".join(text.split())
+
+
 def annotate_cards(client: anthropic.Anthropic, script: dict, manifest: list) -> dict:
-    """표지를 뺀 슬라이드 카드마다 (1) 상단 요약 제목 (2) **강조** 표시가
-    추가된 본문 (3) 있으면 핵심 포인트 한 줄을 Claude에게 한 번에 만들게 한다.
+    """카드마다(표지 포함) 실제로 배정된 사진과 문구를 같이 Claude에게 보여주고
+    (1) 표지면 짧고 강렬한 표지 제목 (2) 본문이면 필요할 때만 요약 제목/포인트
+    (3) 본문이면 **강조** 표시가 추가된 본문을 한 번에 만들게 한다. 문구만
+    보고 판단하지 않고 사진도 같이 보내는 이유는 "이미지랑 대본을 같이 보고
+    디자인하라"는 요청 때문 — 카드마다 박스를 넣을지 말지, 어디를 강조할지가
+    사진 분위기에 따라서도 달라져야 한다.
+
     카드마다 API를 따로 부르지 않고 전체를 한 번에 보내는 이유는, 그래야
     Claude가 카드 사이의 균형(예: 포인트를 너무 많은/적은 카드에 넣지 않기)을
     보고 판단할 수 있고 API 호출 비용도 줄기 때문이다.
 
     안전장치: Claude가 돌려준 body에서 **를 다 지웠을 때 원문과 다르면(문장을
     새로 쓰거나 단어를 바꾼 경우) 강조를 포기하고 원문 그대로 쓴다 — PM 승인을
-    받은 문구를 디자이너 단계에서 임의로 바꾸면 안 되기 때문이다."""
-    body_cards = [c for c in manifest if c.get("role") != "표지"]
-    if not body_cards:
+    받은 문구를 디자이너 단계에서 임의로 바꾸면 안 되기 때문이다. 다만 완전히
+    똑같은 문자열만 통과시키면 공백 하나 차이로도 강조가 통째로 날아가는 일이
+    잦아서(실제로 그래서 "볼드체가 하나도 안 됐다"는 피드백을 받았음), 공백
+    차이는 무시하고 비교한다."""
+    if not manifest:
         return {}
 
-    lines = [f"[{c['index']}] ({c['role']}) {c['text']}" for c in body_cards]
-    user_text = f"주제: {script.get('topic', '')}\n\n" + "\n".join(lines)
+    system_prompt = """당신은 스킨케어 카드뉴스의 디자이너 보조입니다. 각 카드의 실제 사진과
+문구를 같이 보고 판단하세요. PM 승인을 받은 본문 문장 자체(** 강조 마크 제외)는
+절대 바꾸지 마세요. 카드마다 해당 없는 필드는 빈 문자열("")로 두세요 — 모든
+카드에 모든 요소를 다 넣을 필요는 없습니다. 오히려 필요 없는데 억지로 채우면
+안 됩니다.
 
-    system_prompt = """당신은 스킨케어 카드뉴스의 디자이너 보조입니다. PM 승인을 받은 대본
-문구는 그대로 두고, 카드 디자인에 필요한 세 가지만 덧붙이세요.
-
-1. heading: 이 카드가 무슨 내용인지 한눈에 보여주는 아주 짧은 제목(4~14자 정도).
-   본문 문장을 그대로 잘라 쓰지 말고 새로 짧게 요약하세요.
-2. body: 원문 문장을 토씨 하나 바꾸지 말고 그대로 두되, 그 중 가장 중요한
-   구간 한두 곳만 **로 감싸서 강조 표시하세요 (예: "**수분 부족**이 원인").
-   문장을 새로 쓰거나 단어를 바꾸면 안 됩니다.
-3. point: 이 카드에 한 줄로 뽑아낼 만한 뚜렷한 핵심 포인트(6~16자)가 있으면
-   적고, 없으면 빈 문자열("")로 두세요. 모든 카드에 다 넣을 필요는 없습니다 —
-   정보 전달용 카드에는 자연스럽게 어울리지만, 공감/전환 유도용 문장에는
-   억지로 만들지 마세요.
+- cover_title (표지 카드에만): 원래 hook 문장은 카드 안에서 읽는 대사체라
+  길고 늘어지는 경우가 많습니다. 표지 이미지에 큼직하게 들어갈 제목은 그
+  문장을 그대로 쓰지 말고, 스크롤을 멈추게 할 만큼 짧고 강렬하게(5~14자
+  정도) 새로 뽑으세요. 완전한 문장이 아니어도 됩니다. 사진 분위기도 참고해서
+  톤을 맞추세요.
+- heading (본문 카드에만): 사진+문구를 같이 보고, 짧은 제목 하나가 이 카드를
+  더 잘 전달한다고 판단될 때만(4~14자) 채우세요. 문장 자체가 이미 짧고
+  명확하거나, 사진이 이미 내용을 충분히 보여주면 억지로 만들지 말고 빈
+  문자열로 두세요.
+- body (본문 카드에만): 원문 문장을 토씨 하나 바꾸지 말고 그대로 두되, 그 중
+  가장 중요한 구간 한두 곳만 **로 감싸서 강조하세요(예: "**수분 부족**이
+  원인"). 강조할 만한 곳이 뚜렷하지 않으면 강조 없이 원문 그대로 반환해도
+  됩니다.
+- point (본문 카드에만): 한 줄로 뽑아낼 만한 뚜렷한 핵심 포인트(6~16자)가
+  있을 때만 적으세요. 정보 전달용 카드엔 자연스럽게 어울리지만, 공감/전환
+  유도용 문장에는 억지로 만들지 마세요.
 
 submit_annotations 도구로만 응답하세요."""
 
+    content = [{"type": "text", "text": f"주제: {script.get('topic', '')}\n\n아래는 카드 {len(manifest)}장의 사진과 문구입니다."}]
+    for c in manifest:
+        content.append({"type": "text", "text": f"[카드 {c['index']}] 역할: {c['role']}\n문구: {c['text']}"})
+        img_block = _local_image_block(c.get("local_path"))
+        content.append(img_block if img_block else {"type": "text", "text": "(사진 없음)"})
+
     response = client.messages.create(
         model=MODEL,
-        max_tokens=2000,
+        max_tokens=3000,
         system=system_prompt,
         tools=[ANNOTATE_TOOL],
         tool_choice={"type": "tool", "name": "submit_annotations"},
-        messages=[{"role": "user", "content": user_text}],
+        messages=[{"role": "user", "content": content}],
     )
 
     for block in response.content:
         if block.type == "tool_use" and block.name == "submit_annotations":
             result = {}
-            originals = {c["index"]: c["text"] for c in body_cards}
+            originals = {c["index"]: c["text"] for c in manifest}
             for c in block.input.get("cards", []):
                 idx = c.get("index")
                 original = originals.get(idx)
                 if original is None:
                     continue
                 body = c.get("body") or original
-                if body.replace("**", "") != original:
-                    body = original  # 원문이 바뀌었으면 강조 없이 원문 그대로
+                if _normalize_for_compare(body.replace("**", "")) != _normalize_for_compare(original):
+                    print(f"    (카드 {idx}: 강조하면서 원문이 살짝 달라져서 강조 없이 원문 그대로 사용)")
+                    body = original
                 result[idx] = {
+                    "cover_title": (c.get("cover_title") or "").strip() or None,
                     "heading": (c.get("heading") or "").strip() or None,
                     "annotated_text": body,
                     "point": (c.get("point") or "").strip() or None,
@@ -534,27 +604,17 @@ submit_annotations 도구로만 응답하세요."""
 # 3종 템플릿
 # ---------------------------------------------------------------------------
 
-def draw_role_tag(draw, label: str, fonts: dict):
-    """세이프존 위쪽에 역할 태그(작은 포인트색 글씨) 박스 라벨을 배치한다.
-    모든 본문/표지 카드가 공유하는 공통 요소. 페이지 번호("N/9")는 표지·
-    본문·마무리 어디에도 안 넣기로 함(사용자 요청) — 캐러셀 자체가 이미
-    번호를 보여주니 중복이라 뺐다."""
-    y = SAFE_TOP
-    pad_x, pad_y = 16, 10
-    label_w = draw.textlength(label, font=fonts["label"])
-    draw.rounded_rectangle(
-        [CONTENT_MARGIN_X - pad_x, y - pad_y, CONTENT_MARGIN_X + label_w + pad_x, y + LABEL_SIZE + pad_y],
-        radius=8,
-        fill=(*COLOR_SCRIM, 140),
-    )
-    draw.text((CONTENT_MARGIN_X, y), label, font=fonts["label"], fill=COLOR_ACCENT)
-
-
 def render_header_card(card: dict, fonts: dict) -> Image.Image:
-    """1번 카드(표지) 템플릿: 주제 키워드를 작은 라벨로 hook 문구 바로 위에
-    붙이고, 큰 제목을 하단 세이프존에 왼쪽 정렬로 배치한다(참고 레퍼런스의
-    표지 구성 — 가운데 정렬 대신 하단좌측에 킥커+제목을 한 덩어리로)."""
-    lines = wrap_tokens(card["text"], fonts["title"], CONTENT_WIDTH)
+    """1번 카드(표지) 템플릿: 큰 제목을 하단 세이프존에 왼쪽 정렬로 배치한다
+    (참고 레퍼런스의 표지 구성 — 가운데 정렬 대신 하단좌측).
+
+    제목은 대본의 hook 문장을 그대로 쓰지 않는다 — hook은 "얼굴은 번들거리는데
+    속은 당기고... 이거 저만 그런가요?ㅠㅠ" 처럼 카드 안에서 읽는 대사체라
+    표지 이미지 제목으로 쓰기엔 길고 늘어진다는 피드백을 받았다. 대신
+    annotate_cards()가 만든 cover_title(짧고 강렬한 제목)을 쓰고, 없으면
+    (API 키 없음 등) hook 원문으로 폴백한다."""
+    title_text = card.get("cover_title") or card["text"]
+    lines = wrap_tokens(title_text, fonts["title"], CONTENT_WIDTH)
     line_height = int(TITLE_SIZE * 1.25)
     title_top = SAFE_BOTTOM - line_height * len(lines)
 
@@ -562,23 +622,20 @@ def render_header_card(card: dict, fonts: dict) -> Image.Image:
     bg = add_scrim(bg, bands=[(title_top, CANVAS_H, 205)])
     draw = ImageDraw.Draw(bg)
 
-    draw_role_tag(draw, "표지", fonts)
-
-    topic = card.get("topic", "")
-    if topic:
-        render_box_text(draw, topic, CONTENT_MARGIN_X, title_top - 62, fonts["label_regular"], CONTENT_WIDTH, text_color=COLOR_ACCENT)
-
     draw_wrapped(draw, lines, CONTENT_MARGIN_X, title_top, line_height, align="left", font_normal=fonts["title"])
 
     return bg.convert("RGB")
 
 
 def render_body_card(card: dict, fonts: dict) -> Image.Image:
-    """2~N번 카드(슬라이드 본문) 템플릿: 역할 태그 → (있으면) 요약 제목 박스 →
-    (있으면) 포인트 칩 → 본문 문단 순으로 왼쪽 정렬로 쌓는다. 본문은 항상
-    하단 고정이고, 위쪽 요소(요약 제목/포인트)가 유난히 길어서 겹칠 것 같으면
+    """2~N번 카드(슬라이드 본문) 템플릿: (있으면) 요약 제목 박스 → (있으면)
+    포인트 칩 → 본문 문단 순으로 왼쪽 정렬로 쌓는다. 본문은 항상 하단
+    고정이고, 위쪽 요소(요약 제목/포인트)가 유난히 길어서 겹칠 것 같으면
     본문을 그 아래로 내려서 배치한다.
 
+    요약 제목/포인트는 둘 다 선택 사항이다 — annotate_cards()가 카드 사진과
+    문구를 같이 보고 "이 카드에 실제로 도움이 될 때만" 채우도록 판단하므로,
+    모든 카드에 박스가 다 들어가지는 않는다(내용에 안 맞으면 아예 생략).
     "요약 제목"은 본문 문장을 그대로 잘라 위로 올리는 게 아니라(문장이 중간에
     끊겨 보이는 문제가 있었음) Claude가 새로 뽑은 짧은 문구를 쓴다 —
     annotate_cards()가 없으면(ANTHROPIC_API_KEY 미설정 등) heading/point 없이
@@ -594,11 +651,11 @@ def render_body_card(card: dict, fonts: dict) -> Image.Image:
     # 1) 위쪽 블록(요약 제목 + 포인트 칩)이 실제로 몇 픽셀을 차지하는지 더미
     # draw로 먼저 계산한다 — 이걸 알아야 본문이 겹치지 않는 위치를 알 수 있고,
     # 스크림도 최종 본문 위치에 맞춰 미리 깔 수 있다.
-    y = SAFE_TOP + TAG_RESERVE
+    y = SAFE_TOP + CONTENT_TOP_PAD
     if heading:
         y = render_box_text(_MEASURE_DRAW, heading, CONTENT_MARGIN_X, y, fonts["heading"], CONTENT_WIDTH)
     if point:
-        y = render_box_text(_MEASURE_DRAW, point, CONTENT_MARGIN_X, y, fonts["point"], CONTENT_WIDTH, prefix="→ ", outline=COLOR_ACCENT)
+        y = render_box_text(_MEASURE_DRAW, point, CONTENT_MARGIN_X, y, fonts["point"], CONTENT_WIDTH, prefix="→ ", text_color=COLOR_POINT_TEXT)
     top_block_bottom = y
 
     body_top = SAFE_BOTTOM - body_block_height
@@ -609,13 +666,11 @@ def render_body_card(card: dict, fonts: dict) -> Image.Image:
     bg = add_scrim(bg, bands=[(body_top - 44, CANVAS_H, 200)])
     draw = ImageDraw.Draw(bg)
 
-    draw_role_tag(draw, card["role"], fonts)
-
-    y = SAFE_TOP + TAG_RESERVE
+    y = SAFE_TOP + CONTENT_TOP_PAD
     if heading:
         y = render_box_text(draw, heading, CONTENT_MARGIN_X, y, fonts["heading"], CONTENT_WIDTH)
     if point:
-        y = render_box_text(draw, point, CONTENT_MARGIN_X, y, fonts["point"], CONTENT_WIDTH, prefix="→ ", outline=COLOR_ACCENT)
+        y = render_box_text(draw, point, CONTENT_MARGIN_X, y, fonts["point"], CONTENT_WIDTH, prefix="→ ", text_color=COLOR_POINT_TEXT)
 
     draw_wrapped(
         draw, body_lines, CONTENT_MARGIN_X, body_top, body_line_height,
@@ -633,8 +688,6 @@ def render_closing_card(card: dict, fonts: dict) -> Image.Image:
     bg = load_background(card.get("local_path"))
     bg = add_full_scrim(bg, opacity=165)
     draw = ImageDraw.Draw(bg)
-
-    draw_role_tag(draw, "마무리", fonts)
 
     cta_lines = wrap_tokens(card["cta"], fonts["title"], CONTENT_WIDTH)
     cta_line_height = int(TITLE_SIZE * 1.25)
