@@ -99,7 +99,7 @@ import sys
 from pathlib import Path
 
 import anthropic
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageStat
 
 PROJECT_DIR = Path(__file__).parent
 MODEL = "claude-sonnet-5"
@@ -118,12 +118,28 @@ CONTENT_WIDTH = CANVAS_W - CONTENT_MARGIN_X * 2
 # 아닌 라벨이 카드에 들어가는 게 이상하다"는 피드백을 받고 태그 자체를 없앴다.
 CONTENT_TOP_PAD = 16
 
-# 색상 팔레트. 사진 위에 바로 얹는 텍스트(스크림 없이 사진 위에 바로)는 흰 텍스트 / 포인트색을
-# 고정으로 쓴다. 요약 제목/포인트 박스는 light(흰 배경+짙은 텍스트) / dark(짙은
-# 반투명 배경+흰 텍스트) 두 버전이 있지만, 카드마다 따로 고르지 않고 카드
-# 세트 전체에 "딱 하나"만 정해서 통일한다(build_cards에서) — 사진수집가가
-# 세트 톤을 한 번만 정하는 것과 같은 원리. 카드마다 흰 박스/검정 박스가
-# 섞이면 오히려 산만하고 통일감이 없어 보인다는 피드백을 받았다.
+# 색상 팔레트.
+#
+# 사진 위에 바로 얹는 텍스트(표지 제목/킥커, 본문 문단, 마무리 CTA/질문/핸들)는
+# 스크림이나 박스 같은 배경 요소를 아예 안 쓴다 — 대신 사진 세트 전체의 평균
+# 밝기를 코드로 재서(decide_text_style) 흰 텍스트/짙은 텍스트 중 세트 전체에
+# 통일해서 쓸 색을 딱 하나 고른다. 카드마다 색이 섞이면 캐러셀을 넘길 때
+# 산만해 보인다는 피드백을 반영했다 — 대신 그 색과 대비가 안 맞는 카드는
+# (표지/본문에 한해) 색을 바꾸는 게 아니라 사진에서 그 색과 더 잘 맞는
+# 자리로 텍스트 위치 자체를 옮긴다(sample_brightness). 참고 레퍼런스
+# 카드뉴스들도 텍스트 뒤에 별도 배경 없이, 사진에서 톤이 고른 자리(어두운
+# 옷/그늘/블러된 여백)에 글자를 놓아 대비를 만들고 있었다.
+#
+# 요약 제목/포인트 박스는 이 판단과 무관하게 원래부터 자체 불투명 배경이
+# 있어서 항상 읽히므로 그대로 둔다 — light(흰 배경+짙은 텍스트) / dark(짙은
+# 반투명 배경+흰 텍스트) 두 버전 중 카드 세트 전체에 "딱 하나"만 정해서
+# 통일한다(build_cards에서) — 사진수집가가 세트 톤을 한 번만 정하는 것과
+# 같은 원리. 카드마다 흰 박스/검정 박스가 섞이면 오히려 산만하고 통일감이
+# 없어 보인다는 피드백을 받았다.
+#
+# 아래 두 팔레트를 사진 위 텍스트와 박스 라벨이 공유한다 — "dark" 팔레트는
+# 사진이 어두운 자리에서 쓰는 흰 텍스트/살구색 포인트, "light" 팔레트는
+# 사진이 밝은 자리에서 쓰는 짙은 텍스트/짙은 오렌지 포인트다.
 COLOR_TEXT = (255, 255, 255, 255)
 COLOR_ACCENT = (232, 176, 132, 255)
 # 순검정에 가까우면 사진 위에서 "이질적인 검은 박스"처럼 붕 떠 보인다는
@@ -131,15 +147,20 @@ COLOR_ACCENT = (232, 176, 132, 255)
 # 조정했다(예전 (20,15,12) → 지금 (36,22,17)).
 COLOR_SCRIM = (36, 22, 17)
 
-# light 버전: 밝은 사진 위에서도 항상 또렷한 흰 박스+짙은 텍스트(참고
-# 레퍼런스 스타일). dark 버전: 사진이 이미 밝고 화사해서 흰 박스를 얹으면
-# 튀거나 밋밋해 보일 때, 사진 톤에 자연스럽게 녹아드는 짙은 반투명 박스+흰
-# 텍스트. 테두리 선 없이 배경색만 채운다 — 선으로 둘러싸이는 느낌이 싫다는
-# 피드백을 받고 뺐다.
 BOX_STYLES = {
     "light": {"bg": (255, 255, 255, 235), "text": (24, 20, 18, 255), "point_text": (168, 88, 40, 255)},
     "dark": {"bg": (*COLOR_SCRIM, 210), "text": (255, 255, 255, 255), "point_text": (232, 176, 132, 255)},
 }
+
+# 텍스트가 놓일 자리의 사진 평균 밝기(0~255, crop_images.py의 get_brightness와
+# 같은 방식)가 이 값 이상이면 "밝은 자리"로 보고 BOX_STYLES["light"](짙은
+# 텍스트)를, 미만이면 BOX_STYLES["dark"](흰 텍스트)를 쓴다.
+TEXT_BRIGHTNESS_THRESHOLD = 150
+
+# 표지/본문 카드가 텍스트 위치를 두 후보 중 하나로 고를 때, 두 후보의 밝기
+# 차이가 이 값보다 뚜렷할 때만 자리를 옮긴다 — 차이가 미미한데도 매번
+# 옮기면 오히려 이유 없이 위치가 들쭉날쭉해 보인다.
+BRIGHTNESS_FLIP_MARGIN = 15
 
 TITLE_SIZE = 72    # 표지 hook / 마무리 CTA
 HEADING_SIZE = 54  # 본문 카드 상단 요약 제목
@@ -387,6 +408,41 @@ def load_background(local_path) -> Image.Image:
                 img = img.resize((CANVAS_W, CANVAS_H), Image.LANCZOS)
             return img.convert("RGBA")
     return Image.new("RGBA", (CANVAS_W, CANVAS_H), (*COLOR_SCRIM, 255))
+
+
+def sample_brightness(img: Image.Image, box: tuple) -> float:
+    """box=(left, top, right, bottom) 영역만 잘라내서 평균 밝기(0~255,
+    그레이스케일 변환 후 평균)를 잰다. crop_images.py의 get_brightness와 같은
+    방식(PIL의 'L' 변환은 ITU-R 601 가중치를 쓴다)이라 사진 톤을 다루는 다른
+    단계들과 밝기 기준이 어긋나지 않는다. 텍스트를 실제로 그리기 전에, 그
+    자리의 사진이 밝은지 어두운지 보고 글자색을 정하기 위한 함수다. box가
+    이미지 범위를 벗어나거나 크기가 0이면(계산 실수로 좌표가 이상해도 죽지
+    않게) 중간값을 반환해 안전하게 넘어간다."""
+    left, top, right, bottom = box
+    left, top = max(0, int(left)), max(0, int(top))
+    right, bottom = min(img.width, int(right)), min(img.height, int(bottom))
+    if right <= left or bottom <= top:
+        return 128.0
+    region = img.convert("RGB").crop((left, top, right, bottom))
+    return ImageStat.Stat(region.convert("L")).mean[0]
+
+
+def decide_text_style(manifest: list) -> str:
+    """카드 세트 전체 사진의 평균 밝기를 한 번만 재서, 사진 위에 바로 얹는
+    텍스트(표지/본문/마무리)에 세트 전체가 통일해서 쓸 색을 하나 정한다 —
+    사진수집가가 세트 톤을, annotate_cards가 box_style을 각각 한 번만
+    정하는 것과 같은 원리. 텍스트가 가장 자주 놓이는 하단 세이프존 근처
+    밝기를 카드마다 재서 평균 낸다. 사진이 없는 카드(local_path 없음)는
+    load_background가 짙은 대체 배경을 주므로 자연히 어두운 쪽에 반영된다."""
+    if not manifest:
+        return "dark"
+    sample_h = min(300, SAFE_BOTTOM - SAFE_TOP)
+    brightnesses = [
+        sample_brightness(load_background(c.get("local_path")), (0, SAFE_BOTTOM - sample_h, CANVAS_W, SAFE_BOTTOM))
+        for c in manifest
+    ]
+    avg = sum(brightnesses) / len(brightnesses)
+    return "light" if avg >= TEXT_BRIGHTNESS_THRESHOLD else "dark"
 
 
 def render_box_text(
@@ -666,7 +722,7 @@ def _title_font_size(title_text: str) -> int:
     return TITLE_SIZE
 
 
-def render_header_card(card: dict, fonts: dict) -> Image.Image:
+def render_header_card(card: dict, fonts: dict, text_style: str) -> Image.Image:
     """1번 카드(표지) 템플릿. 제목은 대본의 hook 문장을 그대로 쓰지 않는다 —
     hook은 "얼굴은 번들거리는데 속은 당기고... 이거 저만 그런가요?ㅠㅠ" 처럼
     카드 안에서 읽는 대사체라 표지 이미지 제목으로 쓰기엔 길고 늘어진다는
@@ -681,7 +737,18 @@ def render_header_card(card: dict, fonts: dict) -> Image.Image:
     표지 사진 구도에 맞는 배치(하단좌측/가운데/상단좌측) 중 하나를 쓴다 —
     표지가 매번 똑같은 자리에 똑같은 크기로만 나오면 임팩트가 없다는 피드백
     반영. 사진에 여백이 없을 때(annotate_cards가 판단 못 했을 때)는 기존
-    방식(하단좌측)으로 안전하게 폴백한다."""
+    방식(하단좌측)으로 안전하게 폴백한다.
+
+    text_style("light"=짙은 텍스트/"dark"=흰 텍스트)는 카드 세트 전체에서
+    딱 하나로 정해서 넘어온다(decide_text_style) — 카드마다 흰 글자/검은
+    글자가 섞이면 캐러셀을 넘길 때 산만해 보인다는 피드백을 반영해, 색은
+    스크림처럼 사진 위에 뭘 더 깔지 않고도 세트 전체에서 통일한다. 대신
+    cover_align이 "top-left"/"bottom-left"일 때는 정반대 위치와 밝기를
+    비교해서, 지금 위치가 이 색과 대비가 뚜렷이 나쁘면(BRIGHTNESS_FLIP_MARGIN
+    이상 차이) 사진에서 더 잘 보이는 쪽으로 자동으로 옮긴다 — 색을 바꾸는
+    대신 사진의 더 어둡거나(흰 텍스트일 때) 더 밝은(짙은 텍스트일 때) 자리로
+    이동시키는 방식. "center"는 사진 여백을 보고 고른 특별한 배치라 그대로
+    둔다."""
     title_text = card.get("cover_title") or card["text"]
     kicker_text = card.get("cover_kicker")
     align = card.get("cover_align") or "bottom-left"
@@ -702,32 +769,50 @@ def render_header_card(card: dict, fonts: dict) -> Image.Image:
 
     total_height = kicker_block_height + title_block_height
 
-    if align == "top-left":
-        block_top = SAFE_TOP + CONTENT_TOP_PAD
-    elif align == "center":
-        block_top = SAFE_TOP + (SAFE_BOTTOM - SAFE_TOP - total_height) // 2
-    else:  # bottom-left
-        block_top = SAFE_BOTTOM - total_height
+    def block_top_for(a):
+        if a == "top-left":
+            return SAFE_TOP + CONTENT_TOP_PAD
+        if a == "center":
+            return SAFE_TOP + (SAFE_BOTTOM - SAFE_TOP - total_height) // 2
+        return SAFE_BOTTOM - total_height  # bottom-left
 
+    block_top = block_top_for(align)
     bg = load_background(card.get("local_path"))
+
+    if align in ("top-left", "bottom-left"):
+        alt_align = "top-left" if align == "bottom-left" else "bottom-left"
+        alt_top = block_top_for(alt_align)
+        cur_b = sample_brightness(bg, (0, block_top, CANVAS_W, block_top + total_height))
+        alt_b = sample_brightness(bg, (0, alt_top, CANVAS_W, alt_top + total_height))
+        wants_darker = text_style == "dark"  # 흰 텍스트는 더 어두운 자리가 필요
+        if wants_darker and alt_b < cur_b - BRIGHTNESS_FLIP_MARGIN:
+            align, block_top = alt_align, alt_top
+        elif not wants_darker and alt_b > cur_b + BRIGHTNESS_FLIP_MARGIN:
+            align, block_top = alt_align, alt_top
+
+    colors = BOX_STYLES[text_style]
     draw = ImageDraw.Draw(bg)
 
     x = CANVAS_W // 2 if x_align == "center" else CONTENT_MARGIN_X
     title_top = block_top
     if kicker_lines:
-        draw_wrapped(draw, kicker_lines, x, block_top, kicker_line_height, align=x_align, font_normal=fonts["label"], fill_normal=COLOR_ACCENT)
+        draw_wrapped(draw, kicker_lines, x, block_top, kicker_line_height, align=x_align, font_normal=fonts["label"], fill_normal=colors["point_text"])
         title_top = block_top + kicker_block_height
 
-    draw_wrapped(draw, lines, x, title_top, line_height, align=x_align, font_normal=title_font)
+    draw_wrapped(
+        draw, lines, x, title_top, line_height, align=x_align, font_normal=title_font,
+        fill_normal=colors["text"], fill_accent=colors["point_text"],
+    )
 
     return bg.convert("RGB")
 
 
-def render_body_card(card: dict, fonts: dict) -> Image.Image:
+def render_body_card(card: dict, fonts: dict, text_style: str) -> Image.Image:
     """2~N번 카드(슬라이드 본문) 템플릿: (있으면) 요약 제목 박스 → (있으면)
-    포인트 칩 → 본문 문단 순으로 왼쪽 정렬로 쌓는다. 본문은 항상 하단
-    고정이고, 위쪽 요소(요약 제목/포인트)가 유난히 길어서 겹칠 것 같으면
-    본문을 그 아래로 내려서 배치한다.
+    포인트 칩 → 본문 문단 순으로 왼쪽 정렬로 쌓는다. 본문 문단 자리는 "위쪽
+    블록 바로 아래"와 "하단 고정" 두 후보 중, 세트 전체 색(text_style)과 대비가
+    더 좋은 쪽을 고른다 — 겹칠 만큼 위쪽 블록이 길면 선택의 여지 없이 그
+    아래로 붙인다.
 
     요약 제목/포인트는 둘 다 선택 사항이다 — annotate_cards()가 카드 사진과
     문구를 같이 보고 "이 카드에 실제로 도움이 될 때만" 채우도록 판단하므로,
@@ -735,7 +820,11 @@ def render_body_card(card: dict, fonts: dict) -> Image.Image:
     "요약 제목"은 본문 문장을 그대로 잘라 위로 올리는 게 아니라(문장이 중간에
     끊겨 보이는 문제가 있었음) Claude가 새로 뽑은 짧은 문구를 쓴다 —
     annotate_cards()가 없으면(ANTHROPIC_API_KEY 미설정 등) heading/point 없이
-    본문만 렌더링된다."""
+    본문만 렌더링된다.
+
+    text_style은 카드 세트 전체에서 딱 하나로 정해서 넘어온다
+    (decide_text_style) — render_header_card와 같은 이유로 색은 통일하고,
+    대신 사진에서 그 색과 더 잘 맞는 자리로 본문을 옮긴다."""
     heading = card.get("heading")
     point = card.get("point")
     body_text = card.get("annotated_text") or card["text"]
@@ -753,19 +842,31 @@ def render_body_card(card: dict, fonts: dict) -> Image.Image:
     body_block_height = body_line_height * len(body_lines)
 
     # 1) 위쪽 블록(요약 제목 + 포인트 칩)이 실제로 몇 픽셀을 차지하는지 더미
-    # draw로 먼저 계산한다 — 이걸 알아야 본문이 겹치지 않는 위치를 알 수 있다.
+    # draw로 먼저 계산한다 — 이걸 알아야 본문 후보 자리들을 알 수 있다.
     y = box_top_y
     if heading:
         y = render_box_text(_MEASURE_DRAW, heading, edge_x, y, fonts["heading"], CONTENT_WIDTH, style=box_style, align=box_align)
     if point:
         y = render_box_text(_MEASURE_DRAW, point, edge_x, y, fonts["point"], CONTENT_WIDTH, prefix="→ ", style=box_style, align=box_align, is_point=True)
-    top_block_bottom = y
-
-    body_top = SAFE_BOTTOM - body_block_height
-    if body_top < top_block_bottom:
-        body_top = top_block_bottom  # 부득이하게 겹치면 위쪽 블록 바로 아래로
+    top_candidate = y
+    bottom_candidate = SAFE_BOTTOM - body_block_height
 
     bg = load_background(card.get("local_path"))
+
+    if bottom_candidate < top_candidate:
+        body_top = top_candidate  # 겹칠 만큼 길면 선택 여지 없이 위쪽 블록 바로 아래로
+    else:
+        bottom_b = sample_brightness(bg, (0, bottom_candidate, CANVAS_W, bottom_candidate + body_block_height))
+        top_b = sample_brightness(bg, (0, top_candidate, CANVAS_W, top_candidate + body_block_height))
+        wants_darker = text_style == "dark"
+        if wants_darker and top_b < bottom_b - BRIGHTNESS_FLIP_MARGIN:
+            body_top = top_candidate
+        elif not wants_darker and top_b > bottom_b + BRIGHTNESS_FLIP_MARGIN:
+            body_top = top_candidate
+        else:
+            body_top = bottom_candidate
+
+    colors = BOX_STYLES[text_style]
     draw = ImageDraw.Draw(bg)
 
     y = box_top_y
@@ -777,30 +878,34 @@ def render_body_card(card: dict, fonts: dict) -> Image.Image:
     draw_wrapped(
         draw, body_lines, CONTENT_MARGIN_X, body_top, body_line_height,
         align="left", font_normal=fonts["body"], font_accent=fonts["body_bold"],
+        fill_normal=colors["text"], fill_accent=colors["point_text"],
     )
 
     return bg.convert("RGB")
 
 
-def render_closing_card(card: dict, fonts: dict) -> Image.Image:
+def render_closing_card(card: dict, fonts: dict, text_style: str) -> Image.Image:
     """마지막 카드(마무리) 템플릿: CTA + 댓글 유도 질문 + 계정 핸들을 왼쪽
     정렬로 배치한다. approved_script.json의 cta/comment_question은 어느
     슬라이드에도 안 묶여 있어서, 마지막 슬라이드 이미지를 재사용해 이 카드를
-    새로 만든다."""
+    새로 만든다. text_style은 세트 전체에서 통일된 색(decide_text_style)을
+    그대로 쓴다 — 이 템플릿은 위치를 옮길 여지가 크지 않아(핸들이 항상
+    하단에 고정) 헤더/본문과 달리 위치 보정은 하지 않는다."""
     bg = load_background(card.get("local_path"))
+    colors = BOX_STYLES[text_style]
     draw = ImageDraw.Draw(bg)
 
     cta_lines = wrap_tokens(card["cta"], fonts["title"], CONTENT_WIDTH)
     cta_line_height = int(TITLE_SIZE * 1.25)
     y = int(CANVAS_H * 0.40)
-    y = draw_wrapped(draw, cta_lines, CONTENT_MARGIN_X, y, cta_line_height, align="left", font_normal=fonts["title"], fill_normal=COLOR_ACCENT)
+    y = draw_wrapped(draw, cta_lines, CONTENT_MARGIN_X, y, cta_line_height, align="left", font_normal=fonts["title"], fill_normal=colors["point_text"])
 
     y += 30
     q_lines = wrap_tokens(card["comment_question"], fonts["body"], CONTENT_WIDTH)
     q_line_height = int(BODY_SIZE * 1.35)
-    draw_wrapped(draw, q_lines, CONTENT_MARGIN_X, y, q_line_height, align="left", font_normal=fonts["body"])
+    draw_wrapped(draw, q_lines, CONTENT_MARGIN_X, y, q_line_height, align="left", font_normal=fonts["body"], fill_normal=colors["text"])
 
-    draw.text((CONTENT_MARGIN_X, SAFE_BOTTOM - LABEL_SIZE), ACCOUNT_HANDLE, font=fonts["label"], fill=COLOR_TEXT)
+    draw.text((CONTENT_MARGIN_X, SAFE_BOTTOM - LABEL_SIZE), ACCOUNT_HANDLE, font=fonts["label"], fill=colors["text"])
 
     return bg.convert("RGB")
 
@@ -829,21 +934,26 @@ def build_cards(script: dict, manifest: list, annotations: dict = None) -> list:
     annotations = annotations or {}
     fonts = load_fonts()
 
+    # 사진 위에 바로 얹는 텍스트(표지/본문/마무리)가 세트 전체에서 통일해서
+    # 쓸 색을 한 번만 정한다 — 카드마다 색이 섞이지 않게.
+    text_style = decide_text_style(manifest)
+    print(f"  텍스트 색(세트 전체 통일): {'짙은 텍스트' if text_style == 'light' else '흰 텍스트'} (밝기 기준)")
+
     results = []
     has_dedicated_closing = any(c.get("role") == "마무리" for c in manifest)
     for card in manifest:
         card = {**card, "topic": script.get("topic", ""), **annotations.get(card["index"], {})}
         if card["role"] == "표지":
-            img = render_header_card(card, fonts)
+            img = render_header_card(card, fonts, text_style)
         elif card["role"] == "마무리":
             closing_card = {
                 "local_path": card.get("local_path"),
                 "cta": script.get("cta", ""),
                 "comment_question": script.get("comment_question", ""),
             }
-            img = render_closing_card(closing_card, fonts)
+            img = render_closing_card(closing_card, fonts, text_style)
         else:
-            img = render_body_card(card, fonts)
+            img = render_body_card(card, fonts, text_style)
         results.append((card["index"], card["role"], img))
         print(f"  카드 {card['index']}({card['role']}) 렌더링 완료")
 
@@ -854,7 +964,7 @@ def build_cards(script: dict, manifest: list, annotations: dict = None) -> list:
             "cta": script.get("cta", ""),
             "comment_question": script.get("comment_question", ""),
         }
-        closing_img = render_closing_card(closing_card, fonts)
+        closing_img = render_closing_card(closing_card, fonts, text_style)
         closing_index = (manifest[-1]["index"] + 1) if manifest else 1
         results.append((closing_index, "마무리", closing_img))
         print(
