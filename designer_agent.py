@@ -8,9 +8,12 @@ crop_images.py가 만들어둔 로컬 이미지(crop_manifest.json + images/, �
 - 전체 슬라이드 4:5(1080x1350) 고정 — crop_images.py가 이미 보장하므로 여기선 그대로 사용.
 - 템플릿 3종 고정: 헤더(표지) / 본문(슬라이드) / 마무리(CTA+댓글유도+핸들).
 - 폰트 최대 2종(제목 1개 + 본문 1개, 굵기로 위계). 색상은 흰 텍스트 / 포인트색 /
-  어두운 스크림(반투명 박스 역할) 3가지로 고정.
-- 사진 위에 얹는 텍스트는 항상 어두운 그라데이션 스크림이나 반투명 박스 뒤에
-  놓아서, 사진이 밝든 어둡든 가독성이 항상 확보되게 한다.
+  요약제목·포인트 박스(흰 배경 또는 짙은 반투명 배경) 3가지로 고정.
+- 사진 위에 바로 얹는 텍스트(표지 제목/킥커, 본문 문단, 마무리 CTA/질문/핸들)는
+  사진 위에 그대로 놓인다 — 가독성을 위해 사진을 어둡게 덮는 스크림을 깔았던
+  적이 있었지만, "배경에 꼭 뭘 넣어야 하나"는 피드백에 밝은 사진에서 텍스트가
+  덜 읽힐 수 있는 트레이드오프를 감수하고 완전히 뺐다. 요약제목/포인트는
+  원래부터 스크림이 아니라 자체 불투명 박스를 쓰고 있어서 그대로 유지.
 - 상하 15%는 프로필 아이콘/캡션 UI에 가려질 수 있는 세이프존이라 핵심 텍스트는
   그 안쪽에 배치한다.
 
@@ -115,7 +118,7 @@ CONTENT_WIDTH = CANVAS_W - CONTENT_MARGIN_X * 2
 # 아닌 라벨이 카드에 들어가는 게 이상하다"는 피드백을 받고 태그 자체를 없앴다.
 CONTENT_TOP_PAD = 16
 
-# 색상 팔레트. 사진 위에 바로 얹는 텍스트(스크림 뒤)는 흰 텍스트 / 포인트색을
+# 색상 팔레트. 사진 위에 바로 얹는 텍스트(스크림 없이 사진 위에 바로)는 흰 텍스트 / 포인트색을
 # 고정으로 쓴다. 요약 제목/포인트 박스는 light(흰 배경+짙은 텍스트) / dark(짙은
 # 반투명 배경+흰 텍스트) 두 버전이 있지만, 카드마다 따로 고르지 않고 카드
 # 세트 전체에 "딱 하나"만 정해서 통일한다(build_cards에서) — 사진수집가가
@@ -237,8 +240,8 @@ def load_fonts():
 
 # 줄바꿈 계산(wrap_tokens)은 실제 이미지 픽셀과 무관하게 폰트 메트릭만 있으면
 # 되므로, 매 카드 이미지를 만들기 전에 이 더미 draw로 먼저 계산해서 텍스트가
-# 몇 줄인지/블록 높이가 얼마인지 알아낸다. 이걸 알아야 스크림(어두운 그라데이션)과
-# 박스 라벨 크기를 "텍스트가 실제로 차지하는 자리"에 맞춰 깔 수 있다.
+# 몇 줄인지/블록 높이가 얼마인지 알아낸다. 이걸 알아야 박스 라벨 크기와 본문이
+# 겹치지 않는 위치를 "텍스트가 실제로 차지하는 자리"에 맞춰 미리 잡을 수 있다.
 _MEASURE_DRAW = ImageDraw.Draw(Image.new("RGB", (10, 10)))
 
 _ACCENT_RE = re.compile(r"\*\*(.+?)\*\*")
@@ -369,7 +372,7 @@ def draw_wrapped(
 
 
 # ---------------------------------------------------------------------------
-# 배경(사진 또는 대체 배경) + 스크림 + 박스 라벨
+# 배경(사진 또는 대체 배경) + 박스 라벨
 # ---------------------------------------------------------------------------
 
 def load_background(local_path) -> Image.Image:
@@ -384,52 +387,6 @@ def load_background(local_path) -> Image.Image:
                 img = img.resize((CANVAS_W, CANVAS_H), Image.LANCZOS)
             return img.convert("RGBA")
     return Image.new("RGBA", (CANVAS_W, CANVAS_H), (*COLOR_SCRIM, 255))
-
-
-def _band_opacity(y: int, band_top: int, band_bottom: int, max_opacity: int, fade: int, min_opacity: int) -> float:
-    """band_top~band_bottom 구간은 max_opacity, 그 위아래 fade 구간은
-    min_opacity까지 서서히 옅어지고, 더 벗어난 곳은 min_opacity로 깔린다."""
-    fade_in_start = max(0, band_top - fade)
-    fade_out_end = band_bottom + fade
-    if band_top <= y <= band_bottom:
-        return max_opacity
-    if y < band_top:
-        if y <= fade_in_start:
-            return min_opacity
-        t = (y - fade_in_start) / max(1, band_top - fade_in_start)
-        return min_opacity + (max_opacity - min_opacity) * t
-    if y >= fade_out_end:
-        return min_opacity
-    t = (fade_out_end - y) / max(1, fade_out_end - band_bottom)
-    return min_opacity + (max_opacity - min_opacity) * t
-
-
-def add_scrim(img: Image.Image, bands: list, fade: int = 160, min_opacity: int = 40) -> Image.Image:
-    """텍스트 블록이 있는 자리(band)만 어두워지는 스크림을 한 번에 깐다.
-    bands는 [(band_top, band_bottom, max_opacity), ...] 목록. band_bottom을
-    이미지 높이로 주면(표지/본문 하단처럼 텍스트가 맨 아래까지 이어질 때)
-    아래쪽은 옅어지지 않고 가장자리까지 쭉 어둡게 유지된다."""
-    w, h = img.size
-    gradient = Image.new("L", (1, h), 0)
-    for y in range(h):
-        v = max(
-            (_band_opacity(y, max(0, top), min(h, bottom), opacity, fade, min_opacity) for top, bottom, opacity in bands),
-            default=min_opacity,
-        )
-        gradient.putpixel((0, y), int(v))
-    gradient = gradient.resize((w, h))
-    scrim = Image.new("RGBA", (w, h), (*COLOR_SCRIM, 255))
-    scrim.putalpha(gradient)
-    return Image.alpha_composite(img, scrim)
-
-
-def add_full_scrim(img: Image.Image, opacity: int) -> Image.Image:
-    """전체 화면에 균일한 반투명 검정을 깐다. 마무리 카드처럼 사진 위 전체에
-    텍스트가 올라가는 경우, 위쪽만 어두운 그라데이션보다 균일한 스크림이 더
-    안정적으로 읽힌다."""
-    w, h = img.size
-    scrim = Image.new("RGBA", (w, h), (*COLOR_SCRIM, opacity))
-    return Image.alpha_composite(img, scrim)
 
 
 def render_box_text(
@@ -745,24 +702,14 @@ def render_header_card(card: dict, fonts: dict) -> Image.Image:
 
     total_height = kicker_block_height + title_block_height
 
-    # 순검정에 가까운 스크림이 사진 위에서 이질적인 검은 박스처럼 붕 떠
-    # 보인다는 피드백을 받고, 예전보다 옅게(최대 175 안팎) 낮췄다 — 텍스트
-    # 가독성은 유지하면서 사진 톤이 좀 더 비쳐 보이게.
     if align == "top-left":
         block_top = SAFE_TOP + CONTENT_TOP_PAD
-        band = (block_top - 40, block_top + total_height + 60, 165)
     elif align == "center":
         block_top = SAFE_TOP + (SAFE_BOTTOM - SAFE_TOP - total_height) // 2
-        band = (block_top - 50, block_top + total_height + 60, 180)
     else:  # bottom-left
         block_top = SAFE_BOTTOM - total_height
-        band = (block_top - 30, CANVAS_H, 175)
 
     bg = load_background(card.get("local_path"))
-    # fade=0, min_opacity=0: 그라데이션(서서히 옅어지는 전환) 없이 텍스트
-    # 자리에만 딱 잘라 고정 톤의 배경을 깐다 — 위아래로 서서히 밝아지는
-    # 느낌이 어색하다는 피드백을 받고, 부드러운 전환 대신 또렷한 경계로 바꿈.
-    bg = add_scrim(bg, bands=[band], fade=0, min_opacity=0)
     draw = ImageDraw.Draw(bg)
 
     x = CANVAS_W // 2 if x_align == "center" else CONTENT_MARGIN_X
@@ -806,8 +753,7 @@ def render_body_card(card: dict, fonts: dict) -> Image.Image:
     body_block_height = body_line_height * len(body_lines)
 
     # 1) 위쪽 블록(요약 제목 + 포인트 칩)이 실제로 몇 픽셀을 차지하는지 더미
-    # draw로 먼저 계산한다 — 이걸 알아야 본문이 겹치지 않는 위치를 알 수 있고,
-    # 스크림도 최종 본문 위치에 맞춰 미리 깔 수 있다.
+    # draw로 먼저 계산한다 — 이걸 알아야 본문이 겹치지 않는 위치를 알 수 있다.
     y = box_top_y
     if heading:
         y = render_box_text(_MEASURE_DRAW, heading, edge_x, y, fonts["heading"], CONTENT_WIDTH, style=box_style, align=box_align)
@@ -820,9 +766,6 @@ def render_body_card(card: dict, fonts: dict) -> Image.Image:
         body_top = top_block_bottom  # 부득이하게 겹치면 위쪽 블록 바로 아래로
 
     bg = load_background(card.get("local_path"))
-    # fade=0, min_opacity=0: 헤더 카드와 동일하게 그라데이션 없이 본문 자리에만
-    # 또렷한 경계로 고정 톤 배경을 깐다.
-    bg = add_scrim(bg, bands=[(body_top - 44, CANVAS_H, 200)], fade=0, min_opacity=0)
     draw = ImageDraw.Draw(bg)
 
     y = box_top_y
@@ -845,7 +788,6 @@ def render_closing_card(card: dict, fonts: dict) -> Image.Image:
     슬라이드에도 안 묶여 있어서, 마지막 슬라이드 이미지를 재사용해 이 카드를
     새로 만든다."""
     bg = load_background(card.get("local_path"))
-    bg = add_full_scrim(bg, opacity=165)
     draw = ImageDraw.Draw(bg)
 
     cta_lines = wrap_tokens(card["cta"], fonts["title"], CONTENT_WIDTH)
