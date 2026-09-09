@@ -76,6 +76,8 @@ approved_script.json에는 슬라이드(표지+2~8번)와 별개로 cta/comment_
 4. (필요하면) export ACCOUNT_HANDLE="@계정핸들" — 마무리 카드 하단에 표시된다.
    안 정하면 "@계정핸들"이 자리표시자로 들어가니 실제 발행 전에 바꿔야 한다.
 5. python designer_agent.py   (또는 python designer_agent.py --demo)
+   (같은 폴더의 review_log.json이 "미승인(max_revisions_reached)"으로 남아있으면
+   안전장치가 실행을 막는다 — 그래도 진행하려면 --force를 같이 붙인다)
 6. python preview_final.py 를 실행하면 final/ 안의 카드 9장을 한 페이지로
    모아 보여주는 final_preview.html이 생긴다 — 'open final_preview.html'로
    브라우저에서 확인.
@@ -943,12 +945,45 @@ def build_demo_manifest(script: dict) -> list:
     return manifest
 
 
+def check_approval_gate(force: bool = False):
+    """approved_script.json이라는 이름과 달리, orchestrator.py는 3회 반려 끝에도
+    통과 못 하면(max_revisions_reached) 그 미승인 마지막 시도본을 그대로 이
+    파일에 저장한다. 이 확인이 없으면 반려 사유(단정적 표현, 이모티콘 누락 등)가
+    그대로 최종 발행용 이미지로 렌더링될 수 있다. photo_agent.py의 동명 함수와
+    같은 기준(review_log.json의 final_status)을 쓴다 — review_log.json이 아예
+    없으면(대본을 수동으로 준비한 경우 등) 확인할 수단이 없으니 그냥 진행한다."""
+    log_path = PROJECT_DIR / "review_log.json"
+    if not log_path.exists():
+        return
+    try:
+        log = json.loads(log_path.read_text(encoding="utf-8"))
+    except Exception:
+        return
+    status = log.get("final_status")
+    if status == "approved":
+        return
+    if force:
+        print(
+            f"(경고: review_log.json 기준 이 대본은 미승인 상태(final_status={status})입니다. "
+            "--force로 강제 진행해요 — 반려 사유가 최종 이미지에 남아있을 수 있으니 확인하세요.)\n"
+        )
+        return
+    raise SystemExit(
+        f"{log_path}를 보니 이 대본은 아직 PM 승인을 못 받았습니다 "
+        f"(final_status={status}, 시도 {log.get('attempts', '?')}회).\n"
+        "이대로 최종 이미지를 만들면 반려 사유가 그대로 남을 수 있습니다.\n"
+        "대본을 다시 손봐서 orchestrator.py를 재실행하거나, 그래도 지금 상태로 진행하려면 "
+        "'python designer_agent.py --force'(--demo와 함께 써도 됨)로 실행하세요."
+    )
+
+
 def main():
     demo = "--demo" in sys.argv
     manifest_path = PROJECT_DIR / "crop_manifest.json"
     script_path = PROJECT_DIR / "approved_script.json"
     if not script_path.exists():
         raise SystemExit(f"{script_path} 이 없습니다. 먼저 orchestrator.py를 실행하세요.")
+    check_approval_gate(force="--force" in sys.argv)
     script = json.loads(script_path.read_text(encoding="utf-8"))
 
     if manifest_path.exists():

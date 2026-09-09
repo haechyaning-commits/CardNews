@@ -50,11 +50,14 @@ PEXELS_API_KEY가 없으면 Unsplash만으로 동작한다 (필수 아님, 있�
 3. ANTHROPIC_API_KEY도 그대로 설정되어 있어야 한다.
 4. approved_script.json이 폴더에 있어야 한다 (먼저 orchestrator.py 실행).
 5. python photo_agent.py
+   (같은 폴더의 review_log.json이 "미승인(max_revisions_reached)"으로 남아있으면
+   안전장치가 실행을 막는다 — 그래도 진행하려면 python photo_agent.py --force)
 """
 
 import base64
 import json
 import os
+import sys
 from pathlib import Path
 
 import anthropic
@@ -861,12 +864,49 @@ def collect_photos(script: dict) -> list:
     return assignments
 
 
+def check_approval_gate(project_dir: Path, force: bool = False):
+    """approved_script.json이라는 이름과 달리, orchestrator.py는 3회 반려 끝에도
+    통과 못 하면(max_revisions_reached) 그 미승인 마지막 시도본을 그대로 이
+    파일에 저장한다(review_script()의 마지막 시도가 반려 상태였다는 뜻). 이
+    함수가 없으면 이후 파이프라인이 그 사실을 모른 채 사진 배정/렌더링까지
+    이어가서, 단정적 표현 같은 반려 사유가 그대로 최종 이미지로 나갈 수 있다.
+    같은 폴더의 review_log.json에 남은 final_status를 확인해서 미승인이면
+    기본적으로 멈추고, review_log.json이 아예 없으면(예: 대본을 수동으로
+    준비한 경우) 확인할 수단이 없으니 그냥 진행한다."""
+    log_path = project_dir / "review_log.json"
+    if not log_path.exists():
+        return
+    try:
+        log = json.loads(log_path.read_text(encoding="utf-8"))
+    except Exception:
+        return  # 로그 파일이 깨져 있어도 이 게이트 때문에 전체 파이프라인이 죽으면 안 된다
+    status = log.get("final_status")
+    if status == "approved":
+        return
+    if force:
+        print(
+            f"(경고: review_log.json 기준 이 대본은 미승인 상태(final_status={status})입니다. "
+            "--force로 강제 진행해요 — 반려 사유가 최종 이미지에 남아있을 수 있으니 확인하세요.)\n"
+        )
+        return
+    raise SystemExit(
+        f"{log_path}를 보니 이 대본은 아직 PM 승인을 못 받았습니다 "
+        f"(final_status={status}, 시도 {log.get('attempts', '?')}회).\n"
+        "이대로 사진 배정/렌더링을 이어가면 반려 사유(단정적 표현, 이모티콘 누락 등)가 "
+        "최종 이미지에 그대로 남을 수 있습니다.\n"
+        "대본을 다시 손봐서 orchestrator.py를 재실행하거나, 그래도 지금 상태로 진행하려면 "
+        "'python photo_agent.py --force'로 실행하세요."
+    )
+
+
 if __name__ == "__main__":
-    script_path = Path(__file__).parent / "approved_script.json"
+    project_dir = Path(__file__).parent
+    script_path = project_dir / "approved_script.json"
     if not script_path.exists():
         raise SystemExit(
             f"{script_path} 이 없습니다. 먼저 orchestrator.py를 실행해서 승인된 대본을 만들어두세요."
         )
+    check_approval_gate(project_dir, force="--force" in sys.argv)
     script = json.loads(script_path.read_text(encoding="utf-8"))
 
     print(f"'{script.get('topic', '')}' 카드뉴스에 쓸 이미지를 수집합니다...\n")
