@@ -759,7 +759,10 @@ def render_header_card(card: dict, fonts: dict) -> Image.Image:
         band = (block_top - 30, CANVAS_H, 175)
 
     bg = load_background(card.get("local_path"))
-    bg = add_scrim(bg, bands=[band])
+    # fade=0, min_opacity=0: 그라데이션(서서히 옅어지는 전환) 없이 텍스트
+    # 자리에만 딱 잘라 고정 톤의 배경을 깐다 — 위아래로 서서히 밝아지는
+    # 느낌이 어색하다는 피드백을 받고, 부드러운 전환 대신 또렷한 경계로 바꿈.
+    bg = add_scrim(bg, bands=[band], fade=0, min_opacity=0)
     draw = ImageDraw.Draw(bg)
 
     x = CANVAS_W // 2 if x_align == "center" else CONTENT_MARGIN_X
@@ -817,7 +820,9 @@ def render_body_card(card: dict, fonts: dict) -> Image.Image:
         body_top = top_block_bottom  # 부득이하게 겹치면 위쪽 블록 바로 아래로
 
     bg = load_background(card.get("local_path"))
-    bg = add_scrim(bg, bands=[(body_top - 44, CANVAS_H, 200)])
+    # fade=0, min_opacity=0: 헤더 카드와 동일하게 그라데이션 없이 본문 자리에만
+    # 또렷한 경계로 고정 톤 배경을 깐다.
+    bg = add_scrim(bg, bands=[(body_top - 44, CANVAS_H, 200)], fade=0, min_opacity=0)
     draw = ImageDraw.Draw(bg)
 
     y = box_top_y
