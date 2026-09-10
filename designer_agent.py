@@ -13,6 +13,13 @@ crop_images.py가 만들어둔 로컬 이미지(crop_manifest.json + images/, �
   놓아서, 사진이 밝든 어둡든 가독성이 항상 확보되게 한다.
 - 상하 15%는 프로필 아이콘/캡션 UI에 가려질 수 있는 세이프존이라 핵심 텍스트는
   그 안쪽에 배치한다.
+- 줄간격은 폰트 크기의 130~150% (모든 line_height 상수가 이 범위 안에 있는지
+  아래 상수 정의부에서 확인 가능).
+- 고정 팔레트(COLOR_TEXT/COLOR_ACCENT/BOX_STYLES)는 모듈 로드 시
+  `_validate_palette_contrast()`로 WCAG AA 대비비(4.5:1) 이상을 자동 검증한다.
+- 문장 강조(**)는 카드 한 장당 최대 2곳, 표지 제목은 최대 1곳까지만
+  포인트 컬러로 남기고 그 이상은 일반 텍스트로 되돌린다(`_limit_accent_markup`)
+  — 포인트 컬러 남발 방지.
 
 레이아웃(v4): 아래 피드백을 반영해서 여러 차례 고쳤다.
 - "문장이 중간에 끊겨 보인다", "카드마다 위치가 달라 산만하다" → 모든 본문
@@ -135,6 +142,49 @@ BOX_STYLES = {
     "light": {"bg": (255, 255, 255, 235), "text": (24, 20, 18, 255), "point_text": (168, 88, 40, 255)},
     "dark": {"bg": (*COLOR_SCRIM, 210), "text": (255, 255, 255, 255), "point_text": (232, 176, 132, 255)},
 }
+
+# WCAG AA 명도 대비 기준(4.5:1) 자동 검증 — Skill 문서 3번(디자이너 규칙)이
+# 요구하는 수치를 고정 팔레트 상수들이 실제로 만족하는지, 누군가 나중에 팔레트
+# 색상을 바꿨을 때도 매 실행마다 자동으로 확인한다. 사진 배경 위 텍스트는
+# 사진마다 실제 밝기가 달라 픽셀 단위로는 검증할 수 없지만, 그 자리를 항상
+# 스크림/박스로 깔아 배경을 COLOR_SCRIM 또는 BOX_STYLES 배경색으로 고정해두기
+# 때문에 "텍스트 vs 그 스크림/박스 배경색" 조합만 확인하면 충분하다.
+MIN_CONTRAST_RATIO = 4.5
+
+
+def _relative_luminance(rgb) -> float:
+    def channel(c):
+        c = c / 255
+        return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+
+    r, g, b = rgb[:3]
+    return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
+
+
+def contrast_ratio(rgb_a, rgb_b) -> float:
+    """WCAG 명도 대비비(1~21). 값이 클수록 대비가 강하다."""
+    l1, l2 = _relative_luminance(rgb_a), _relative_luminance(rgb_b)
+    lighter, darker = max(l1, l2), min(l1, l2)
+    return (lighter + 0.05) / (darker + 0.05)
+
+
+def _validate_palette_contrast() -> None:
+    """텍스트/배경 고정 색상 조합이 기준(4.5:1) 미만이면 경고를 출력한다.
+    렌더링을 막지는 않는다 — 팔레트를 코드로 강제 교정하면 디자인 의도를
+    임의로 바꾸는 셈이라, "기준 미달"을 눈에 띄게 알리는 선까지만 한다."""
+    pairs = [
+        ("사진 위 흰 텍스트 vs 스크림", COLOR_TEXT, COLOR_SCRIM),
+        ("사진 위 포인트색 텍스트 vs 스크림", COLOR_ACCENT, COLOR_SCRIM),
+    ]
+    for style_name, style in BOX_STYLES.items():
+        pairs.append((f"{style_name} 박스 본문 텍스트 vs 배경", style["text"], style["bg"]))
+        pairs.append((f"{style_name} 박스 포인트 텍스트 vs 배경", style["point_text"], style["bg"]))
+
+    for name, fg, bg in pairs:
+        ratio = contrast_ratio(fg, bg)
+        if ratio < MIN_CONTRAST_RATIO:
+            print(f"⚠️  명도 대비 기준 미달: {name} (대비비 {ratio:.2f}, 기준 {MIN_CONTRAST_RATIO} 이상) — 팔레트 조정을 검토하세요.")
+
 
 TITLE_SIZE = 72    # 표지 hook / 마무리 CTA
 HEADING_SIZE = 54  # 본문 카드 상단 요약 제목
@@ -574,6 +624,22 @@ def _normalize_for_compare(text: str) -> str:
     return " ".join(text.split())
 
 
+def _limit_accent_markup(text: str, max_accents: int) -> str:
+    """**강조** 구간이 한 카드에 너무 많으면 포인트 컬러가 남발돼 "강조"로서의
+    기능을 잃는다(Skill 문서 3번 "포인트 컬러는 남발하지 않는다"). Claude가
+    프롬프트 지시보다 더 많이 표시해서 돌려줄 수 있으니, 코드에서 앞에서부터
+    max_accents개까지만 남기고 그 뒤는 마크업만 제거해 일반 텍스트로 되돌린다
+    (원문 자체는 바꾸지 않는다 — 강조 여부만 조정)."""
+    count = 0
+
+    def repl(m):
+        nonlocal count
+        count += 1
+        return m.group(0) if count <= max_accents else m.group(1)
+
+    return _ACCENT_RE.sub(repl, text)
+
+
 def annotate_cards(client: anthropic.Anthropic, script: dict, manifest: list) -> dict:
     """카드마다(표지 포함) 실제로 배정된 사진과 문구를 같이 Claude에게 보여주고
     (1) 표지면 짧고 강렬한 표지 제목 (2) 본문이면 필요할 때만 요약 제목/포인트
@@ -675,9 +741,12 @@ submit_annotations 도구로만 응답하세요."""
                 if _normalize_for_compare(body.replace("**", "")) != _normalize_for_compare(original):
                     print(f"    (카드 {idx}: 강조하면서 원문이 살짝 달라져서 강조 없이 원문 그대로 사용)")
                     body = original
+                body = _limit_accent_markup(body, max_accents=2)
+
+                cover_title = _limit_accent_markup((c.get("cover_title") or "").strip(), max_accents=1)
                 result[idx] = {
                     "cover_kicker": (c.get("cover_kicker") or "").strip() or None,
-                    "cover_title": (c.get("cover_title") or "").strip() or None,
+                    "cover_title": cover_title or None,
                     "cover_align": c.get("cover_align") if c.get("cover_align") in ("bottom-left", "center", "top-left") else None,
                     "heading": (c.get("heading") or "").strip() or None,
                     "annotated_text": body,
@@ -729,7 +798,7 @@ def render_header_card(card: dict, fonts: dict) -> Image.Image:
 
     size = _title_font_size(title_text)
     title_font = fonts["title_maker"](size)
-    line_height = int(size * 1.25)
+    line_height = int(size * 1.3)  # Skill 문서 기준 줄간격 130~150%
 
     x_align = "center" if align == "center" else "left"
     max_w = CONTENT_WIDTH if align != "center" else int(CONTENT_WIDTH * 0.85)
@@ -842,7 +911,7 @@ def render_closing_card(card: dict, fonts: dict) -> Image.Image:
     draw = ImageDraw.Draw(bg)
 
     cta_lines = wrap_tokens(card["cta"], fonts["title"], CONTENT_WIDTH)
-    cta_line_height = int(TITLE_SIZE * 1.25)
+    cta_line_height = int(TITLE_SIZE * 1.3)  # Skill 문서 기준 줄간격 130~150%
     y = int(CANVAS_H * 0.40)
     y = draw_wrapped(draw, cta_lines, CONTENT_MARGIN_X, y, cta_line_height, align="left", font_normal=fonts["title"], fill_normal=COLOR_ACCENT)
 
@@ -944,6 +1013,8 @@ def build_demo_manifest(script: dict) -> list:
 
 
 def main():
+    _validate_palette_contrast()
+
     demo = "--demo" in sys.argv
     manifest_path = PROJECT_DIR / "crop_manifest.json"
     script_path = PROJECT_DIR / "approved_script.json"
