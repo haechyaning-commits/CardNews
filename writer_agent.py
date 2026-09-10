@@ -72,7 +72,10 @@ WRITER_OUTPUT_TOOL = {
                             "type": "string",
                             "enum": ["배경설명", "핵심정보", "반전인사이트"],
                         },
-                        "text": {"type": "string"},
+                        "text": {
+                            "type": "string",
+                            "description": "카드 본문. 이 카드 안에 서로 다른 흐름(예: 상황 설명 → 결론, 원인 → 해결)이 섞여 있으면 한 문단에 몰아넣지 말고 빈 줄(\\n\\n)로 문단을 나눠서 쓴다. 흐름이 하나뿐이면 나누지 않아도 된다.",
+                        },
                     },
                     "required": ["index", "role", "text"],
                 },
@@ -128,6 +131,8 @@ def build_system_prompt(writer_skill: str) -> str:
    들어있어야 한다: {marker_list}. 빠진 슬라이드가 있으면 억지로라도 채워 넣고 제출한다.
 3. caption에서 "~도 담아뒀어요", "~도 정리했어요"처럼 언급한 내용이 실제 slides 안에
    전부 들어있는지 확인한다. caption이 예고만 하고 실제 슬라이드에 없는 내용이 있으면 안 된다.
+4. slides 배열의 각 항목의 text에 서로 다른 흐름이 섞여 있는데 한 문단으로 욱여넣지는
+   않았는지 확인한다. 그런 경우엔 빈 줄(\n\n)로 문단을 나눈다.
 
 작성이 끝나면 반드시 submit_card_news_script 도구를 호출해서 결과를 제출하세요.
 자유 텍스트로 답하지 말고 반드시 도구 호출로만 응답하세요."""
